@@ -1,0 +1,10 @@
+# Never commit real order files – they contain customer names, phones and addresses.
+*.xlsx
+*.xls
+*.xlsm
+samples/
+node_modules/
+__pycache__/
+
+# Company price list – kept out of the public repository
+data/prices.json

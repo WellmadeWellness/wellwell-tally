@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
+<title>Wellwell Monthly Tally</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one working column – upload strip, then category tiles, then tabbed tables. Ledger-like, quiet, coral (명란) accent. */
+:root{
+  --bg:#F4F6F8; --surface:#FFFFFF; --sunk:#EDF0F3; --ink:#15212C; --muted:#5A6774; --line:#D9DFE5;
+  --accent:#C4533A; --accent-ink:#FFFFFF; --accent-soft:#F8E6E1;
+  --retail:#2D628C; --parcel:#2F7A68; --other:#A86B12;
+  --warn:#9A5B00; --warn-soft:#FFF3DC; --bad:#B42318; --bad-soft:#FDE8E6; --ok:#1F7A4D;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10161C; --surface:#18212A; --sunk:#1F2A34; --ink:#E6ECF1; --muted:#9AA7B4; --line:#2C3946;
+  --accent:#E8775D; --accent-ink:#1A0E0A; --accent-soft:#3A221C;
+  --retail:#7DB3DE; --parcel:#6CC4AE; --other:#E2A84B;
+  --warn:#F0B54D; --warn-soft:#3A2D12; --bad:#F2877D; --bad-soft:#3D1E1B; --ok:#6BD39E; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#10161C; --surface:#18212A; --sunk:#1F2A34; --ink:#E6ECF1; --muted:#9AA7B4; --line:#2C3946;
+  --accent:#E8775D; --accent-ink:#1A0E0A; --accent-soft:#3A221C;
+  --retail:#7DB3DE; --parcel:#6CC4AE; --other:#E2A84B;
+  --warn:#F0B54D; --warn-soft:#3A2D12; --bad:#F2877D; --bad-soft:#3D1E1B; --ok:#6BD39E; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-size:22px;margin:0;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+h1 small{display:block;font-size:13px;font-weight:400;color:var(--muted);letter-spacing:0;margin-top:2px}
+h2{font-size:15px;margin:0;font-weight:600}
+.basis{font-size:12px;color:var(--muted);background:var(--sunk);border-radius:999px;padding:4px 10px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.drop{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:16px;border:1.5px dashed var(--line);border-radius:var(--r);background:var(--surface);transition:border-color .15s,background .15s}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop p{margin:0;flex:1 1 280px;min-width:0;color:var(--muted)}
+.drop p b{color:var(--ink);font-weight:600}
+button,.btn{font:inherit;font-weight:500;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:7px 12px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.ghost{border-color:transparent;background:transparent;color:var(--muted);padding:4px 8px}
+button:disabled{opacity:.45;cursor:not-allowed}
+input[type=number],input[type=text],input[type=date],select{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px 8px}
+input[type=number]{width:110px;font-family:var(--mono)}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.bar label{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:13px}
+.spacer{flex:1}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:820px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:4px;min-width:0;position:relative;overflow:hidden}
+.tile::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--c,var(--ink))}
+.tile .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.tile .k span{text-transform:none;letter-spacing:0;font-weight:500}
+.tile .v{font-family:var(--mono);font-size:24px;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .s{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tile.retail{--c:var(--retail)} .tile.parcel{--c:var(--parcel)} .tile.other{--c:var(--other)} .tile.total{--c:var(--accent)}
+.tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--muted);padding:8px 12px}
+.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.pill{display:inline-block;min-width:20px;padding:0 6px;border-radius:999px;font-size:11px;font-weight:600;background:var(--sunk);color:var(--muted);margin-left:4px;text-align:center}
+.pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)}
+.scroll{overflow-x:auto;min-width:0}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:600;background:var(--sunk);position:sticky;top:0;white-space:nowrap}
+td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.tot td{font-weight:600;background:var(--sunk)}
+td:first-child{white-space:nowrap}
+tr.sub td{font-weight:600}
+.chip{display:inline-block;font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.chip.Retail{color:var(--retail)} .chip.Parcel{color:var(--parcel)} .chip.Other{color:var(--other)} .chip.Settlement{color:var(--muted)}
+.chip.warn{color:var(--warn)} .chip.bad{color:var(--bad)}
+.muted{color:var(--muted)} .small{font-size:12px}
+.empty{padding:28px 16px;text-align:center;color:var(--muted)}
+.empty b{color:var(--ink)}
+.section{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
+.checks li{margin-bottom:6px}
+.note{font-size:12px;color:var(--muted);margin:0}
+details>summary{list-style:none} details>summary::-webkit-details-marker{display:none} details[open] #filesTitle .small{display:none}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:9}
+.busy{color:var(--accent);font-size:13px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.role{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:999px;background:var(--sunk);color:var(--muted)}
+.role i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.role.admin i{background:var(--accent)} .role.uploader i{background:var(--parcel)} .role.viewer i{background:var(--muted)} .role.local i{background:var(--warn)}
+.hdr-right{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.progress{height:4px;background:var(--sunk);border-radius:2px;overflow:hidden}
+.progress b{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+svg text{font-family:var(--sans);fill:var(--muted);font-size:11px}
+.diff-pos{color:var(--ok)} .diff-neg{color:var(--bad)}
+.cal{display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr));gap:4px}
+.day{border:1px solid var(--line);border-radius:6px;padding:3px 0 4px;text-align:center;font-size:11px;font-family:var(--mono);background:var(--surface);color:var(--ink)}
+.day small{display:block;font-family:var(--sans);font-size:9px;color:var(--muted);line-height:1.1}
+.day.today{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.day.future{opacity:.45}
+.day.gap{background:var(--warn-soft)}
+.dots{display:flex;justify-content:center;gap:2px;height:6px;margin-top:3px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--c)}
+.mstrip{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
+.mstrip h2{font-size:16px}
+.lock{font-size:12px;color:var(--muted);background:var(--sunk);padding:6px 10px;border-radius:7px}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Wellwell Monthly Tally<small>Retail · 택배 · 기타 – upload order files, get the month</small></h1>
+    <div class="hdr-right">
+      <span class="role local" id="role"><i></i><span>Starting…</span></span>
+      <span class="basis" title="All values use one basis: units × factory price (제조원가) including VAT. This is what Wellwell is paid on every channel.">Basis: factory price (제조원가) incl. VAT</span>
+    </div>
+  </header>
+
+  <label class="drop" id="drop" for="fileInput">
+    <p><b>Drop files here</b> or choose them: B마트, 쿠팡 and 컬리 orders (Retail), daily 발주 files (택배), 슈퍼키친, 웰스토리 and N배송 files (기타), and the month-end 정산 file for the Compare tab. Files are read in this browser – customer names, phones and addresses are never kept or shared.</p>
+    <span class="btn primary" role="button" id="chooseBtn">Choose files</span>
+    <input id="fileInput" type="file" accept=".xlsx,.xls,.xlsm" multiple hidden>
+  </label>
+  <div id="busy" hidden><div class="busy" id="busyText"></div><div class="progress"><b id="busyBar"></b></div></div>
+
+  <div class="bar" id="controls">
+    <label for="month">Month <select id="month"></select></label>
+    <label><input type="checkbox" id="thirdParty"> Include non-Wellwell Coupang suppliers</label>
+    <span class="spacer"></span>
+    <button id="exportBtn" class="primary" disabled>Download Excel</button>
+  </div>
+
+  <div class="panel" id="monthStrip" hidden></div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="panel">
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div id="view"></div>
+  </div>
+  <details class="panel" id="filesPanel" hidden>
+    <summary class="section" style="cursor:pointer"><span class="bar" style="display:inline-flex"><h2 id="filesTitle">Files</h2></span></summary>
+    <div class="bar" style="padding:0 16px 8px"><span class="muted small" id="filesHint"></span><span class="spacer"></span><button class="ghost" id="clearAll">Remove all files</button></div>
+    <div class="scroll"><table id="filesTable" style="min-width:900px"></table></div>
+  </details>
+  <p class="note">Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>/* Wellwell Monthly Tally – parsing and calculation core.
+   Runs in the browser (inlined) and in Node (for tests). Needs the SheetJS XLSX object. */
+(function (root) {
+  'use strict';
+
+  // ---------- helpers ----------
+  const S = v => (v === null || v === undefined) ? '' : String(v).replace(/\t/g, ' ').replace(/\s+/g, ' ').trim();
+  const isNum = v => typeof v === 'number' && isFinite(v);
+  const num = v => isNum(v) ? v : (typeof v === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(v) ? Number(v) : null);
+  const pad = n => String(n).padStart(2, '0');
+  function iso(y, m, d) { return `${y}-${pad(m)}-${pad(d)}`; }
+  function toISO(XLSX, v) {
+    if (isNum(v) && v > 20000 && v < 80000) { const p = XLSX.SSF.parse_date_code(v); return iso(p.y, p.m, p.d); }
+    if (isNum(v) && v > 19000000 && v < 21000000) { const s = String(v); return iso(s.slice(0, 4), s.slice(4, 6), s.slice(6, 8)); }
+    const s = S(v); let m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (m) return iso(m[1], m[2], m[3]);
+    return null;
+  }
+  function hash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+  function normName(p) {
+    let s = S(p).replace(/^\[(.*?)\]\s*/, '$1 ');
+    return s.replace(/\s+/g, ' ').trim();
+  }
+  function rowsOf(XLSX, ws) { return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true, blankrows: false }); }
+  function findHeader(rows, need, avoid, maxScan) {
+    for (let i = 0; i < Math.min(rows.length, maxScan || 15); i++) {
+      const r = rows[i].map(S);
+      if (need.every(n => r.includes(n)) && !(avoid || []).some(a => r.includes(a))) {
+        const map = {}; r.forEach((v, j) => { if (v && !(v in map)) map[v] = j; });
+        return { idx: i, map };
+      }
+    }
+    return null;
+  }
+  const firstCell = rows => { for (const r of rows) for (const c of r) if (c !== null && S(c) !== '') return c; return null; };
+
+  // ---------- channel rules for parcel order numbers (learned from the July 위탁 sheet) ----------
+  const ORDER_RULES = [
+    [/^3[34]\d{8}$/, '카카오톡 스토어'], [/^20\d{14}$/, '스마트스토어-B'], [/^20\d{8}$/, '이지웰몰'], [/^20\d{15}$/, '11번가'],
+    [/^4[45]\d{8}$/, '지마켓'], [/^25\d{8}$/, '옥션'], [/^20\d{12}-\d{3}/, '홈앤쇼핑'], [/^20\d{24}$/, '홈앤쇼핑'],
+    [/^(56|26)\d{10}$/, '농수산쇼핑몰'], [/^(2[89]|3[34])\d{7}$/, '오늘의집'], [/^PO/, 'TEMU'], [/^\d{13,14}$/, '쿠팡'], [/^20\d{16}$/, '샵바이(파트너사)']
+  ];
+  const NON_SALE = ['cs', '샘플', '인플샘플', '인플 샘플', '직원구매', '택배사고', 'cs디스이즈부담', '우리부담cs', '구매인증', '체험단'];
+  const B2B_NAMES = ['녹선', '국민상회(썬스토리)', '삼성웰스토리', '웰스토리', '삼영군납', '슈퍼키친'];
+  function defaultChannelType(ch) {
+    if (/^벌크/.test(ch) || /^오프라인/.test(ch) || B2B_NAMES.includes(ch)) return 'B2B';
+    if (NON_SALE.some(n => ch === n || ch.includes('샘플') || ch.endsWith('체험단'))) return 'Non-sale';
+    return 'Online';
+  }
+
+  // ---------- format parsers ----------
+  function parseBmart(XLSX, rows, ctx) {
+    const h = findHeader(rows, ['업체', '발주번호', '상품명', '발주수량']); if (!h) return null;
+    const date = toISO(XLSX, firstCell(rows.slice(0, h.idx)));
+    const out = [];
+    for (let i = h.idx + 1; i < rows.length; i++) {
+      const r = rows[i], g = k => r[h.map[k]];
+      if (S(r[0]) === '합계') break;
+      const prod = S(g('상품명')); if (!prod || !isNum(g('발주수량'))) continue;
+      out.push({ cat: 'Retail', channel: 'B마트', date, product: prod, qty: g('발주수량'), boxes: g('박스수량'),
+        ref: S(g('발주번호')), center: S(g('입고')), supplier: S(g('업체')),
+        key: ['B마트', S(g('발주번호')), S(g('입고')), prod, g('발주수량')].join('|') });
+    }
+    return { kind: 'Retail · B마트 order', date, lines: out };
+  }
+  function parseCoupang(XLSX, rows, ctx) {
+    const h = findHeader(rows, ['물류센터', '발주번호', '상품명', '발주수량']); if (!h) return null;
+    const date = toISO(XLSX, firstCell(rows.slice(0, h.idx)));
+    const out = [];
+    for (let i = h.idx + 1; i < rows.length; i++) {
+      const r = rows[i], g = k => r[h.map[k]];
+      const prod = S(g('상품명')); if (!prod || !isNum(g('발주수량'))) continue;
+      const sup = S(g('구분'));
+      out.push({ cat: 'Retail', channel: '쿠팡', date, product: prod, qty: g('발주수량'), boxes: g('박스수량'),
+        ref: S(g('발주번호')), center: S(g('물류센터')), supplier: sup, thirdParty: !!sup && sup !== '웰웰',
+        key: ['쿠팡', S(g('발주번호')), S(g('물류센터')), prod, g('발주수량')].join('|') });
+    }
+    return { kind: 'Retail · 쿠팡 order', date, lines: out };
+  }
+  function parseKurly(XLSX, rows, ctx) {
+    if (!findHeader(rows, ['입고예정일', '상품명', '낱개'], null, 40)) return null;
+    const out = []; let map = null, storage = '냉장';
+    for (const r of rows) {
+      const t = r.map(S); const first = t.find(x => x);
+      if (first && first.startsWith('*') && first.includes('컬리')) { storage = first.includes('냉동') ? '냉동' : '냉장'; map = null; continue; }
+      if (t.includes('상품명') && t.includes('낱개')) { map = {}; t.forEach((v, j) => { if (v && !(v in map)) map[v] = j; }); continue; }
+      if (!map) continue;
+      const g = k => r[map[k]]; const prod = S(g('상품명'));
+      if (!prod || !isNum(g('낱개'))) continue;
+      const date = toISO(XLSX, g('입고예정일'));
+      out.push({ cat: 'Retail', channel: '마켓컬리', date, product: prod, qty: g('낱개'), boxes: g('박스'),
+        ref: S(g('상품코드')), center: S(g('입고지')), supplier: '경한글로벌', storage,
+        key: ['마켓컬리', date, S(g('상품코드')), S(g('입고지')), g('낱개')].join('|') });
+    }
+    const dates = out.map(l => l.date).filter(Boolean).sort();
+    return { kind: 'Retail · 마켓컬리 order', date: dates[0] || null, lines: out };
+  }
+  function shipDateFromName(name, fallbackYear) {
+    const base = name.replace(/\.[^.]+$/, '');
+    let m = base.match(/(?:^|\D)(\d{1,2})\.(\d{1,2})(?:\D|$)/);
+    if (m) return iso(fallbackYear, m[1], m[2]);
+    const all = [...base.matchAll(/(?:^|\D)(\d{4})(?=\D|$)/g)].map(x => x[1]).filter(x => +x.slice(0, 2) >= 1 && +x.slice(0, 2) <= 12 && +x.slice(2) >= 1 && +x.slice(2) <= 31);
+    if (all.length) { const x = all[all.length - 1]; return iso(fallbackYear, x.slice(0, 2), x.slice(2)); }
+    return null;
+  }
+  function parseParcel(XLSX, rows, ctx) {
+    const h = findHeader(rows, ['상품명', '수량', '주문번호'], ['택배사', '운송장번호', '송장번호', '결제일'], 3); if (!h) return null;
+    const dcol = '주문일자' in h.map ? '주문일자' : ('날짜' in h.map ? '날짜' : null);
+    const out = [];
+    for (let i = h.idx + 1; i < rows.length; i++) {
+      const r = rows[i], g = k => (k in h.map) ? r[h.map[k]] : null;
+      const prod = S(g('상품명')); const q = num(g('수량'));
+      if (!prod || q === null) continue;
+      const ord = S(g('주문번호')), mk = S(g('업체명')), chCol = S(g('채널'));
+      let channel = null, how = 'named';
+      if (ord && !/^\d/.test(ord)) channel = ord;
+      else if (chCol) channel = chCol;
+      else {
+        const id = mk.split(' ')[0];
+        for (const [re, c] of ORDER_RULES) if (re.test(id)) { channel = c; how = 'order-number format'; break; }
+        if (!channel && id && !/^\d/.test(id)) channel = id;
+      }
+      if (!channel) { channel = 'Unidentified'; how = 'unknown'; }
+      const od = dcol ? toISO(XLSX, g(dcol)) : null;
+      const who = hash(S(g('수취인명')) + '|' + S(g('우편번호')));   // one-way; names and addresses are never kept
+      out.push({ cat: 'Parcel', channel, how, orderDate: od, product: prod, qty: q, ref: ord, market: mk,
+        key: ['P', ord, mk, prod, q, who].join('|') });
+    }
+    const ods = out.map(l => l.orderDate).filter(d => d && d > '2015').sort();
+    const year = ods.length ? ods[ods.length - 1].slice(0, 4) : String(new Date().getFullYear());
+    let ship = shipDateFromName(ctx.fileName, year) || (ods.length ? ods[ods.length - 1] : null);
+    out.forEach(l => { l.date = ship; });
+    return { kind: 'Parcel · 택배 발주', date: ship, lines: out, shipFromName: !!shipDateFromName(ctx.fileName, year) };
+  }
+  const RETAIL_WORDS = /(쿠팡|b마트|비마트|컬리)/i;
+  function parseOther(XLSX, rows, ctx) {
+    const h = findHeader(rows, ['상품명', '발주수량', '박스수량'], ['업체', '물류센터'], 6); if (!h) return null;
+    const title = S(firstCell(rows.slice(0, h.idx)));
+    const m = title.match(/^(\d{1,2})\s*\/\s*(\d{1,2})\s*(?:\([^)]*\))?\s*(.*?)\s*(발주|출고|입고)/);
+    if (!m) return null;
+    const cust = S(m[3]).replace(/\s*\(.*\)$/, '');
+    if (RETAIL_WORDS.test(cust)) return { kind: 'skip', reason: `Old-format ${cust} list – Retail comes from the order files` };
+    const out = [];
+    let expYear = null;
+    for (let i = h.idx + 1; i < rows.length; i++) {
+      const r = rows[i], g = k => (k in h.map) ? r[h.map[k]] : null;
+      if (S(r[0]) === '합계' || S(r.find(x => x !== null)) === '합계') break;
+      const prod = S(g('상품명')); const q = g('발주수량');
+      if (!prod || !isNum(q) || /^#/.test(prod)) continue;
+      const exp = toISO(XLSX, g('유통기한')) || toISO(XLSX, g('유통기한가이드'));
+      if (exp && !expYear) expYear = exp;
+      out.push({ cat: 'Other', channel: cust, product: prod, qty: q, boxes: g('박스수량'), expiry: exp, center: S(g('입고처')) });
+    }
+    // year: the expiry date is the only year in these sheets – an order is shipped before it expires
+    let y = new Date().getFullYear();
+    if (expYear) { const ey = +expYear.slice(0, 4), md = expYear.slice(5); y = (md >= iso(2000, m[1], m[2]).slice(5)) ? ey : ey - 1; }
+    const date = iso(y, m[1], m[2]);
+    out.forEach(l => { l.date = date; l.key = ['O', cust, date, l.product, l.qty].join('|'); });
+    return { kind: `Other · ${cust}`, date, lines: out };
+  }
+
+  // ---------- workbook ----------
+  function parseWorkbook(XLSX, data, fileName, today) {
+    const wb = XLSX.read(data, { type: 'array', cellDates: false });
+    const res = { fileName, sheets: [], lines: [], notes: [], kinds: new Set() };
+    let parcelTaken = false; const oldSheets = []; const skipped = [];
+    const now = today || new Date().toISOString().slice(0, 10);
+    if (wb.SheetNames.includes('총 합계') && wb.SheetNames.includes('위탁')) {
+      res.settlement = parseSettlement(XLSX, wb, fileName);
+      const st = res.settlement;
+      res.notes.push(st ? `Month-end settlement for ${st.month} (${st.site}), total ${Math.round(st.total).toLocaleString('ko-KR')}. Not added to the tally – used in the Compare tab.` : 'Looks like a settlement file, but its 총 합계 sheet could not be read.');
+      res.kinds = ['Settlement']; return res;
+    }
+    for (const name of wb.SheetNames) {
+      const rows = rowsOf(XLSX, wb.Sheets[name]); if (!rows.length) continue;
+      let r = parseBmart(XLSX, rows) || parseCoupang(XLSX, rows) || parseKurly(XLSX, rows);
+      if (!r && !parcelTaken) { r = parseParcel(XLSX, rows, { fileName }); if (r) parcelTaken = true; }
+      if (!r) r = parseOther(XLSX, rows, { fileName });
+      if (!r) { skipped.push(name); continue; }
+      if (r.kind === 'skip') { oldSheets.push(name); continue; }
+      if (r.date && (daysBetween(r.date, now) > 365 || daysBetween(now, r.date) > 45)) { oldSheets.push(name); continue; }
+      r.lines.forEach(l => { l.sheet = name; l.file = fileName; });
+      res.sheets.push({ name, kind: r.kind, lines: r.lines.length, units: r.lines.reduce((a, l) => a + l.qty, 0), date: r.date, shipFromName: r.shipFromName });
+      res.kinds.add(r.kind.split(' · ')[0]);
+      res.lines.push(...r.lines);
+    }
+    if (oldSheets.length) res.notes.push(`${oldSheets.length} old sheet${oldSheets.length > 1 ? 's' : ''} skipped (dated outside the last year, or an old outbound list): ${oldSheets.slice(0, 4).join(', ')}${oldSheets.length > 4 ? ' …' : ''}`);
+    if (skipped.length) res.minor = `${skipped.length} other sheet${skipped.length > 1 ? 's' : ''} not used (pivots, print or template sheets)`;
+    if (!res.lines.length) res.notes.push('No order lines recognised in this file.');
+    res.kinds = [...res.kinds];
+    return res;
+  }
+  function daysBetween(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 864e5); }
+
+  // ---------- pricing and totals ----------
+  function priceFor(product, prices) {
+    const n = normName(product);
+    if (prices[n]) return { price: prices[n][0], src: prices[n][1], matched: n };
+    const gift = /사은품/.test(n);
+    const c2 = n.replace(/\(사은품\)/g, '').replace(/\*[^*]*\*/g, '').replace(/\s+/g, ' ').trim();
+    if (prices[c2]) return { price: prices[c2][0], src: (gift ? 'Free gift at cost of ' : 'Same item as ') + c2, matched: c2, gift };
+    const c3 = c2.replace(/\((?:[^()]*뚜껑[^()]*)\)/g, '').replace(/\s+/g, ' ').trim();
+    if (prices[c3]) return { price: prices[c3][0], src: 'Same item as ' + c3, matched: c3, gift };
+    return { price: null, src: null, matched: c3, gift };
+  }
+  function compute(files, prices, channelTypes, opts) {
+    opts = opts || {};
+    const seen = new Map(); const all = [];
+    for (const f of files) for (const l of f.lines) {
+      const x = Object.assign({}, l);
+      if (f.shipOverride && x.cat === 'Parcel') x.date = f.shipOverride;
+      x.month = x.date ? x.date.slice(0, 7) : 'unknown';
+      const p = priceFor(x.product, prices);
+      x.price = p.price; x.priceSrc = p.src; x.gift = !!p.gift; x.priceKey = p.matched;
+      x.value = p.price ? p.price * x.qty : 0;
+      x.type = x.cat === 'Parcel' ? (channelTypes[x.channel] || defaultChannelType(x.channel)) : (x.cat === 'Retail' ? 'Retail' : 'B2B');
+      x.group = x.cat === 'Parcel' && x.type === 'B2B' ? 'Other' : x.cat;
+      x.excluded = null;
+      if (x.thirdParty && !opts.includeThirdParty) x.excluded = 'Third-party supplier (' + x.supplier + ')';
+      const prev = seen.get(x.key);
+      if (prev && prev !== f.fileName) x.excluded = 'Duplicate of a line in ' + prev;
+      else if (!prev) seen.set(x.key, f.fileName);
+      all.push(x);
+    }
+    return all;
+  }
+  // ---------- month-end settlement file (Phase 3) ----------
+  function parseSettlement(XLSX, wb, fileName) {
+    const tot = rowsOf(XLSX, wb.Sheets['총 합계']);
+    const title = S(firstCell(tot));
+    const mm = title.match(/(\d{1,2})\s*월/); if (!mm) return null;
+    const site = (wb.SheetNames.includes('부자재 의왕') || /의왕/.test(title)) ? 'Uiwang' : 'Sokcho';
+    const items = {}; let total = null, started = false;
+    for (const r of tot) {
+      const t = r.map(S);
+      if (t.includes('채널') && t.includes('금액')) { started = true; continue; }
+      if (!started) continue;
+      const name = t.find(x => x); const val = r.find(isNum);
+      if (!name || val === undefined) continue;
+      if (/총\s*합계/.test(name)) { total = val; break; }
+      items[name] = (items[name] || 0) + val;
+    }
+    if (total === null) total = Object.values(items).reduce((a, b) => a + b, 0);
+    // consignment (위탁) by channel, and the year
+    const consignment = {}; let year = null;
+    const wt = rowsOf(XLSX, wb.Sheets['위탁']); const h = findHeader(wt, ['상품명', '수량', '금액'], null, 5);
+    if (h) for (let i = h.idx + 1; i < wt.length; i++) {
+      const r = wt[i]; const amt = r[h.map['금액']]; if (!isNum(amt) || !S(r[h.map['상품명']])) continue;
+      const ch = S(r[h.map['채널']]) || '(no channel)'; consignment[ch] = (consignment[ch] || 0) + amt;
+      if (!year && '출고일자' in h.map) { const d = toISO(XLSX, r[h.map['출고일자']]); if (d) year = d.slice(0, 4); }
+    }
+    // 경한글로벌 at factory price (+VAT), so it can be compared on the same basis
+    let gyeonghanCost = null;
+    if (wb.SheetNames.includes('경한글로벌')) {
+      for (const r of rowsOf(XLSX, wb.Sheets['경한글로벌'])) {
+        const t = r.map(S); const j = t.indexOf('(+vat)');
+        if (j >= 0) { const v = r.slice(j + 1).find(isNum); if (v) { gyeonghanCost = v; break; } }
+      }
+    }
+    year = year || String(new Date().getFullYear());
+    return { month: `${year}-${pad(mm[1])}`, site, items, total, consignment, gyeonghanCost, fileName };
+  }
+  // Map a settlement onto Retail / 택배 / 기타 on the factory-price basis.
+  function settlementGroups(st, channelTypes) {
+    const g = { Retail: 0, Parcel: 0, Other: 0, NotInOrders: 0 }; const detail = [];
+    const add = (grp, label, v, note) => { g[grp] += v; detail.push({ group: grp, label, value: v, note: note || '' }); };
+    for (const [k, v] of Object.entries(st.items)) {
+      if (/쿠팡/.test(k)) add('Retail', k, v);
+      else if (/[Bb]마트|비마트/.test(k)) add('Retail', k, v);
+      else if (/경한/.test(k)) {
+        if (st.gyeonghanCost) { add('Retail', k + ' (at factory price)', st.gyeonghanCost, 'Settlement ' + Math.round(v).toLocaleString('ko-KR') + ' – compared at factory price'); add('NotInOrders', k + ' margin above factory price', v - st.gyeonghanCost); }
+        else add('Retail', k, v);
+      }
+      else if (/^위탁/.test(k)) {
+        let b2b = 0;
+        for (const [ch, a] of Object.entries(st.consignment)) { const t = channelTypes[ch] || defaultChannelType(ch); if (t === 'B2B') b2b += a; }
+        add('Parcel', '위탁 (online + non-sale)', v - b2b); if (b2b) add('Other', '위탁 B2B / 벌크 / 오프라인', b2b);
+      }
+      else if (/N배송|수출|시장|직원/.test(k)) add('Other', k, v);
+      else add('NotInOrders', k, v, /부자재/.test(k) ? 'Packaging fee – not in order files' : (/조정/.test(k) ? 'Management adjustment' : ''));
+    }
+    return { groups: g, detail };
+  }
+  root.Tally = { parseWorkbook, compute, priceFor, normName, defaultChannelType, ORDER_RULES, hash, settlementGroups };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>
+const BASE_PRICES = {};
+const local = {
+  get(k, d){ try{ const v = localStorage.getItem('wwtally:'+k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem('wwtally:'+k, JSON.stringify(v)); }catch(e){} }
+};
+const state = {
+  mode: 'local', role: 'local', me: null,
+  tab: local.get('tab','summary'), month: null, thirdParty: false,
+  // local mode
+  localFiles: [], localSettlements: {},
+  // shared mode
+  meta: new Map(), chunks: new Map(), loadedMonths: new Set(), monthSubs: new Map(), settlements: {},
+  priceOverrides: local.get('prices', {}), channelTypes: local.get('channels', {}),
+  lines: [], names: {}, pendingRemove: null
+};
+let db = null, user = null, downloads = null;
+// Browser database for the saved-copy (local) mode, so uploads survive closing the page.
+const idb = {
+  open(){ return new Promise((res, rej) => { try{ const r = indexedDB.open('wellwell-tally', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }catch(e){ rej(e); } }); },
+  async get(k){ try{ const d = await idb.open(); return await new Promise(res => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); }); }catch(e){ return undefined; } },
+  async set(k, v){ try{ const d = await idb.open(); await new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); return true; }catch(e){ return false; } }
+};
+let localSaveOk = null;
+async function saveLocal(){
+  if (state.mode !== 'local') return;
+  const ok = await idb.set('files', state.localFiles) && await idb.set('settlements', state.localSettlements);
+  localSaveOk = ok; setRole('local', true);
+  if (!ok) toast('This browser would not save the files – they will be gone when the page closes');
+}
+async function loadLocal(){
+  const f = await idb.get('files'); const st = await idb.get('settlements');
+  if (Array.isArray(f)) state.localFiles = f; if (st && typeof st === 'object') state.localSettlements = st;
+  localSaveOk = f !== undefined ? true : localSaveOk;
+}
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const won = v => '₩' + Math.round(v || 0).toLocaleString('ko-KR');
+const n0 = v => Math.round(v || 0).toLocaleString('ko-KR');
+const short = v => { v = v || 0; const s = v < 0 ? '−' : ''; const a = Math.abs(v); if (a >= 1e8) return s+'₩' + (a/1e8).toFixed(2) + '억'; if (a >= 1e4) return s+'₩' + n0(a/1e4) + '만'; return s+won(a); };
+const GROUPS = [['Retail','리테일','retail'],['Parcel','택배','parcel'],['Other','기타','other']];
+const canWrite = () => state.mode === 'local' || state.role === 'admin' || state.role === 'uploader';
+const canAdmin = () => state.mode === 'local' || state.role === 'admin';
+function prices(){ const p = Object.assign({}, BASE_PRICES); for (const [k,v] of Object.entries(state.priceOverrides)) p[k] = [v, state.mode==='shared' ? 'Set by an editor' : 'Entered here']; return p; }
+function toast(msg){ const t = document.createElement('div'); t.className='toast'; t.setAttribute('role','status'); t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 3000); }
+function busy(text, frac){ $('#busy').hidden = text == null; if (text != null){ $('#busyText').textContent = text; $('#busyBar').style.width = Math.round((frac||0)*100) + '%'; } }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function retry(fn){ try{ return await fn(); }catch(e){ if (e && e.code === 'unavailable'){ await sleep(400 + Math.random()*600); return await fn(); } throw e; } }
+
+// ---------- compact storage of lines (no personal data is ever in a line) ----------
+const PACK = {cat:'c',channel:'ch',how:'h',date:'d',orderDate:'od',product:'p',qty:'q',boxes:'b',ref:'r',center:'ce',supplier:'s',thirdParty:'t',key:'k',sheet:'sh',storage:'st',expiry:'ex',market:'m'};
+const UNPACK = Object.fromEntries(Object.entries(PACK).map(([a,b])=>[b,a]));
+const pack = l => { const o = {}; for (const [a,b] of Object.entries(PACK)) if (l[a] !== undefined && l[a] !== null && l[a] !== '') o[b] = l[a]; return o; };
+const unpack = (o, fileName) => { const l = { file: fileName }; for (const [b,v] of Object.entries(o)) l[UNPACK[b]||b] = v; return l; };
+const monthOf = d => d ? d.slice(0,7) : 'unknown';
+const pad2 = n => String(n).padStart(2,'0');
+const NOW = new Date(); const TODAY = `${NOW.getFullYear()}-${pad2(NOW.getMonth()+1)}-${pad2(NOW.getDate())}`; const THIS_MONTH = TODAY.slice(0,7);
+const monthLabel = m => { if (!m || m === 'all') return 'All months'; const [y,mo] = m.split('-'); return new Date(+y, +mo-1, 1).toLocaleDateString('en-US',{ month:'long', year:'numeric' }); };
+
+// ---------- start-up: shared mode when the page runs inside Claude with shared data ----------
+async function init(){
+  render();
+  if (!(window.claude && window.claude.use)){ await loadLocal(); setRole('local'); return; }
+  try{ downloads = await window.claude.use('downloads'); }catch(e){ downloads = null; }
+  try{ db = await window.claude.use('db'); user = await window.claude.use('user'); }catch(e){ db = null; }
+  if (!db){ await loadLocal(); setRole('local'); return; }
+  state.mode = 'shared';
+  const me = user ? await user.me() : { id: null, canEdit: false };
+  state.me = me.id;
+  const w = user ? await user.can('data.write') : null;
+  setRole(me.canEdit ? 'admin' : (w === false ? 'viewer' : 'uploader'));
+  state.priceOverrides = {}; state.channelTypes = {};
+  db.doc('config/prices').onSnapshot(s => { state.priceOverrides = (s.exists && s.data().items) || {}; recompute(); }, dbErr);
+  db.doc('config/channels').onSnapshot(s => { state.channelTypes = (s.exists && s.data().types) || {}; recompute(); }, dbErr);
+  db.collection('settlements').onSnapshot(s => { state.settlements = {}; s.docs.forEach(d => state.settlements[d.id] = d.data()); recompute(); }, dbErr);
+  db.collection('files').onSnapshot(s => {
+    state.meta = new Map(s.docs.map(d => [d.id, Object.assign({ id: d.id }, d.data())]));
+    const months = orderMonths();
+    if (!state.month || (state.month !== 'all' && !allMonths().includes(state.month))) state.month = THIS_MONTH;
+    ensureMonths(); resolveNames(); recompute();
+  }, dbErr);
+}
+function dbErr(e){ if (e && e.code === 'revoked'){ setRole('viewer'); } else if (e) toast('Shared data problem: ' + (e.code || 'error')); }
+function setRole(r, quiet){
+  state.role = r; if (r === 'local') state.mode = 'local';
+  const txt = { local: localSaveOk === false ? 'Not saved – this browser blocks storage' : 'Saved in this browser only – not shared', admin: 'Editor · saved for the team', uploader: 'Contributor · saved for the team', viewer: 'View only' }[r];
+  if (quiet){ $('#role').lastElementChild.textContent = txt; return; }
+  $('#role').className = 'role ' + r; $('#role').lastElementChild.textContent = txt;
+  $('#drop').style.display = canWrite() ? '' : 'none';
+  if (r === 'local'){ state.month = state.month || THIS_MONTH; recompute(); }
+}
+async function resolveNames(){
+  if (!user) return; const ids = [...new Set([...state.meta.values()].map(m => m.uploadedBy).filter(Boolean))];
+  if (!ids.length) return; try{ const ps = await user.profiles(ids); for (const id of ids) state.names[id] = (ps[id] && ps[id].name) || 'a team member'; renderFiles(); }catch(e){}
+}
+function allMonths(){
+  const st = Object.values(settlementsAll()).map(x => x.month);
+  return [...new Set(orderMonths().concat(st, [THIS_MONTH]))].sort();
+}
+function orderMonths(){
+  if (state.mode === 'local') return [...new Set(state.localFiles.flatMap(f => f.lines.map(l => monthOf(f.shipOverride && l.cat==='Parcel' ? f.shipOverride : l.date))))].sort();
+  return [...new Set([...state.meta.values()].flatMap(m => m.months || []))].sort();
+}
+function neededMonths(){
+  const ms = orderMonths();
+  if (state.month === 'all' || state.tab === 'trends') return ms.slice(-12);
+  return state.month ? [state.month] : [];
+}
+function ensureMonths(){
+  if (state.mode !== 'shared') return;
+  const need = new Set(neededMonths());
+  if (state.monthSubs.size > 24) for (const [m, un] of state.monthSubs) if (!need.has(m)){ un(); state.monthSubs.delete(m); state.chunks.delete(m); state.loadedMonths.delete(m); }
+  for (const m of need){
+    if (state.monthSubs.has(m)) continue;
+    const unsub = db.collection('months/' + m + '/chunks').onSnapshot(s => {
+      const mp = new Map(); s.docs.forEach(d => mp.set(d.id, d.data())); state.chunks.set(m, mp); state.loadedMonths.add(m); recompute();
+    }, dbErr);
+    state.monthSubs.set(m, unsub);
+  }
+}
+
+// ---------- assemble files from local memory or shared chunks ----------
+function currentFiles(){
+  if (state.mode === 'local') return state.localFiles;
+  const byFile = new Map();
+  for (const [, mp] of state.chunks) for (const [, c] of mp){
+    const meta = state.meta.get(c.fileId); if (!meta) continue;          // only complete uploads count
+    if (!byFile.has(c.fileId)) byFile.set(c.fileId, { id: c.fileId, fileName: meta.fileName, lines: [], shipOverride: meta.shipOverride || null });
+    const f = byFile.get(c.fileId); for (const o of c.lines) f.lines.push(unpack(o, meta.fileName));
+  }
+  return [...byFile.values()].sort((a,b) => (state.meta.get(a.id).uploadedAt||'').localeCompare(state.meta.get(b.id).uploadedAt||''));
+}
+function recompute(){
+  state.lines = Tally.compute(currentFiles(), prices(), state.channelTypes, { includeThirdParty: state.thirdParty });
+  const months = allMonths();
+  if (!state.month || (state.month !== 'all' && !months.includes(state.month))) state.month = THIS_MONTH;
+  $('#month').innerHTML = [...months].reverse().map(m => `<option value="${m}">${monthLabel(m)}${m===THIS_MONTH?' – this month':''}</option>`).join('') + '<option value="all">All months</option>';
+  $('#month').value = state.month;
+  render();
+}
+
+// ---------- upload ----------
+async function sha(buf){ try{ const h = await crypto.subtle.digest('SHA-256', buf); return [...new Uint8Array(h)].slice(0,10).map(b=>b.toString(16).padStart(2,'0')).join(''); }catch(e){ return 'f' + buf.byteLength.toString(36) + Date.now().toString(36); } }
+async function addFiles(list){
+  if (!canWrite()){ toast('You can view this page but not upload. Ask the owner for Contributor access.'); return; }
+  if (typeof XLSX === 'undefined'){ toast('The Excel reader did not load. Check the connection and reload.'); return; }
+  const today = new Date().toISOString().slice(0,10);
+  let i = 0, added = 0;
+  for (const f of list){
+    i++; busy(`Reading ${f.name} (${i} of ${list.length})`, (i-1)/list.length); await sleep(10);
+    try{
+      const buf = await f.arrayBuffer(); const id = await sha(buf);
+      const known = state.mode === 'shared' ? state.meta.has(id) : state.localFiles.some(x => x.id === id);
+      if (known){ toast(f.name + ' was already uploaded – skipped'); continue; }
+      const res = Tally.parseWorkbook(XLSX, new Uint8Array(buf), f.name, today); res.id = id;
+      if (res.settlement){ await saveSettlement(res.settlement); added++; continue; }
+      if (!res.lines.length){ toast(f.name + ': ' + (res.notes[0] || 'no order lines found')); continue; }
+      if (state.mode === 'local'){ state.localFiles.push(res); added++; continue; }
+      busy(`Saving ${f.name} for the team (${i} of ${list.length})`, (i-0.5)/list.length);
+      await saveShared(res); added++;
+    }catch(e){ toast(`${f.name}: ${e.code === 'quota_exceeded' ? 'shared storage is full – remove old files first' : (e.message || e.code || 'could not be read')}`); }
+  }
+  busy(null);
+  if (state.mode === 'local'){ recompute(); if (added) await saveLocal(); }
+  if (added) toast(`${added} file${added>1?'s':''} added`);
+}
+async function writeChunks(id, lines){
+  const byMonth = new Map(); for (const l of lines){ const m = monthOf(l.date); if (!byMonth.has(m)) byMonth.set(m, []); byMonth.get(m).push(pack(l)); }
+  const paths = [];
+  for (const [m, ls] of byMonth){
+    for (let k = 0; k * 500 < ls.length; k++){
+      const path = `months/${m}/chunks/${id}_${k}`;
+      await retry(() => db.doc(path).set({ fileId: id, month: m, lines: ls.slice(k*500, (k+1)*500) }));
+      paths.push(path);
+    }
+  }
+  return { paths, months: [...byMonth.keys()] };
+}
+async function saveShared(res){
+  const { paths, months } = await writeChunks(res.id, res.lines);
+  await retry(() => db.doc('files/' + res.id).set({
+    fileName: res.fileName, kinds: res.kinds, notes: res.notes, minor: res.minor || '',
+    sheets: res.sheets.map(s => ({ name: s.name, kind: s.kind, date: s.date || null, lines: s.lines, units: s.units, shipFromName: !!s.shipFromName })),
+    months, chunks: paths, lineCount: res.lines.length, units: res.lines.reduce((a,l)=>a+l.qty,0),
+    uploadedBy: state.me || null, uploadedAt: new Date().toISOString(), shipOverride: null
+  }));
+  if (state.month !== 'all' && months.length && !months.includes(state.month)) toast(`${res.fileName} saved under ${months.map(monthLabel).join(', ')}`);
+}
+async function saveSettlement(st){
+  const id = `${st.month}_${st.site}`;
+  if (state.mode === 'local'){ state.localSettlements[id] = st; recompute(); return; }  // saved by addFiles
+  if (!canAdmin()){ toast('Only an editor can upload the month-end settlement file'); return; }
+  await retry(() => db.doc('settlements/' + id).set(Object.assign({}, st, { uploadedBy: state.me || null, uploadedAt: new Date().toISOString() })));
+}
+async function removeFile(id){
+  if (state.mode === 'local'){ state.localFiles = state.localFiles.filter(f => f.id !== id); recompute(); saveLocal(); return; }
+  const m = state.meta.get(id); if (!m) return;
+  busy('Removing ' + m.fileName, .3);
+  try{ for (const p of (m.chunks || [])) await retry(() => db.doc(p).delete()); await retry(() => db.doc('files/' + id).delete()); toast(m.fileName + ' removed'); }
+  catch(e){ toast('Could not remove: ' + (e.code || e.message)); }
+  busy(null);
+}
+async function setShipDate(id, date){
+  if (state.mode === 'local'){ const f = state.localFiles.find(x => x.id === id); if (f){ f.shipOverride = date || null; recompute(); saveLocal(); } return; }
+  const m = state.meta.get(id); if (!m) return;
+  busy('Moving ' + m.fileName + ' to ' + date, .3);
+  try{
+    const lines = []; for (const p of m.chunks){ const s = await retry(() => db.doc(p).get()); if (s.exists) s.data().lines.forEach(o => lines.push(unpack(o, m.fileName))); }
+    lines.forEach(l => { if (l.cat === 'Parcel') l.date = date; });
+    for (const p of m.chunks) await retry(() => db.doc(p).delete());
+    const { paths, months } = await writeChunks(id, lines);
+    await retry(() => db.doc('files/' + id).update({ chunks: paths, months, shipOverride: date }));
+    if (state.month !== 'all' && !months.includes(state.month)) { state.month = months[0]; } ensureMonths();
+  }catch(e){ toast('Could not change the date: ' + (e.code || e.message)); }
+  busy(null);
+}
+async function savePrice(key, val){
+  if (!canAdmin()){ toast('Only an editor can change prices'); return; }
+  const next = Object.assign({}, state.priceOverrides); if (val === null) delete next[key]; else next[key] = val;
+  if (state.mode === 'local'){ state.priceOverrides = next; local.set('prices', next); recompute(); return; }
+  try{ await retry(() => db.doc('config/prices').set({ items: next, updatedBy: state.me || null, updatedAt: new Date().toISOString() })); }catch(e){ toast('Could not save the price: ' + (e.code || e.message)); }
+}
+async function saveChannelType(ch, t){
+  if (!canAdmin()){ toast('Only an editor can change channel types'); return; }
+  const next = Object.assign({}, state.channelTypes, { [ch]: t });
+  if (state.mode === 'local'){ state.channelTypes = next; local.set('channels', next); recompute(); return; }
+  try{ await retry(() => db.doc('config/channels').set({ types: next, updatedBy: state.me || null, updatedAt: new Date().toISOString() })); }catch(e){ toast('Could not save: ' + (e.code || e.message)); }
+}
+
+// ---------- events ----------
+const drop = $('#drop');
+['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => addFiles([...ev.dataTransfer.files]));
+$('#fileInput').addEventListener('change', ev => { addFiles([...ev.target.files]); ev.target.value=''; });
+$('#clearAll').addEventListener('click', async () => {
+  if (state.pendingRemove !== 'ALL'){ state.pendingRemove = 'ALL'; $('#clearAll').textContent = 'Click again to remove all'; setTimeout(()=>{ if (state.pendingRemove==='ALL'){ state.pendingRemove=null; $('#clearAll').textContent='Remove all files'; } }, 4000); return; }
+  state.pendingRemove = null; $('#clearAll').textContent = 'Remove all files';
+  if (state.mode === 'local'){ state.localFiles = []; state.localSettlements = {}; recompute(); saveLocal(); return; }
+  for (const id of [...state.meta.keys()]) await removeFile(id);
+});
+$('#thirdParty').addEventListener('change', ev => { state.thirdParty = ev.target.checked; recompute(); });
+$('#month').addEventListener('change', ev => { state.month = ev.target.value; ensureMonths(); recompute(); });
+
+// ---------- rendering ----------
+const active = () => state.lines.filter(l => !l.excluded && (state.month === 'all' || l.month === state.month));
+function sum(arr, f){ return arr.reduce((a,x)=>a+(f(x)||0),0); }
+function groupBy(arr, kf){ const m = new Map(); for (const x of arr){ const k = kf(x); if(!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; }
+function render(){ renderFiles(); renderMonthStrip(); renderTiles(); renderTabs(); renderView(); $('#exportBtn').disabled = !state.lines.length; }
+function fileRows(){
+  if (state.mode === 'local') return state.localFiles.map(f => ({ id: f.id, fileName: f.fileName, kinds: f.kinds, sheets: f.sheets, notes: f.notes, minor: f.minor, lines: f.lines.length, units: sum(f.lines,l=>l.qty), shipOverride: f.shipOverride, mine: true }));
+  return [...state.meta.values()].sort((a,b)=>(b.uploadedAt||'').localeCompare(a.uploadedAt||'')).map(m => ({ id: m.id, fileName: m.fileName, kinds: m.kinds, sheets: m.sheets, notes: m.notes, minor: m.minor, lines: m.lineCount, units: m.units, shipOverride: m.shipOverride, by: m.uploadedBy, at: m.uploadedAt, mine: !m.uploadedBy || m.uploadedBy === state.me }));
+}
+function renderFiles(){
+  const rows = fileRows(); const p = $('#filesPanel'); p.hidden = !rows.length; if (!rows.length) return;
+  const nw = rows.filter(f => (f.notes||[]).length || (f.kinds[0]==='Parcel' && f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride)).length;
+  $('#filesTitle').innerHTML = `${state.mode==='shared'?'Team files':'Saved files'} <span class="pill">${rows.length}</span>` + (nw ? `<span class="pill warn">${nw} with notes</span>` : '') + ' <span class="muted small" style="font-weight:400">– show details</span>';
+  $('#filesHint').textContent = state.mode === 'shared' ? 'Saved permanently for the team. Every authorised person sees these files; removing a file removes it for everyone.' : 'Saved in this browser on this computer. Other people and other browsers do not see them – use the page in Claude to share.';
+  $('#clearAll').hidden = !canAdmin();
+  const body = rows.map(f => {
+    const kind = (f.kinds||[])[0] || 'Unknown';
+    const sheets = (f.sheets||[]).map(s => esc((s.kind||'').split(' · ')[1] || s.kind) + (s.date ? ' <span class="muted">' + s.date + '</span>' : '')).join('<br>');
+    const canEditRow = canAdmin() || (canWrite() && f.mine);
+    const shipVal = f.shipOverride || ((f.sheets||[])[0]||{}).date || '';
+    const ship = kind === 'Parcel' ? (canEditRow ? `<input type="date" value="${esc(shipVal)}" data-ship="${esc(f.id)}" aria-label="Ship date for ${esc(f.fileName)}">` : esc(shipVal)) + ((f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride) ? '<div class="small" style="color:var(--warn)">No date in file name – check</div>' : '') : '';
+    const who = state.mode === 'shared' ? `<div class="small muted">${esc(f.by ? (state.names[f.by] || 'a team member') : '')}${f.at ? ' · ' + esc(f.at.slice(0,16).replace('T',' ')) : ''}</div>` : '';
+    const rm = canEditRow ? `<button class="ghost" data-rm="${esc(f.id)}">${state.pendingRemove===f.id?'Confirm remove':'Remove'}</button>` : '';
+    return `<tr><td>${esc(f.fileName)}${who}</td><td><span class="chip ${esc(kind)}">${esc(kind)}</span></td><td>${sheets || '<span class="muted">–</span>'}</td><td>${ship}</td>
+      <td class="n">${n0(f.lines)}</td><td class="n">${n0(f.units)}</td><td class="small muted" style="max-width:320px">${(f.notes||[]).map(esc).join('<br>')}${f.minor?`<div>${esc(f.minor)}</div>`:''}</td><td>${rm}</td></tr>`;
+  }).join('');
+  $('#filesTable').innerHTML = `<thead><tr><th>File</th><th>Type</th><th>Read as</th><th>Ship date</th><th class="n">Lines</th><th class="n">Units</th><th>Notes</th><th></th></tr></thead><tbody>${body}</tbody>`;
+  $('#filesTable').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
+    const id = b.dataset.rm;
+    if (state.pendingRemove !== id){ state.pendingRemove = id; renderFiles(); setTimeout(()=>{ if (state.pendingRemove===id){ state.pendingRemove=null; renderFiles(); } }, 4000); return; }
+    state.pendingRemove = null; removeFile(id);
+  });
+  $('#filesTable').querySelectorAll('[data-ship]').forEach(inp => inp.onchange = () => { if (inp.value) setShipDate(inp.dataset.ship, inp.value); });
+}
+function renderMonthStrip(){
+  const el = $('#monthStrip'); const m = state.month;
+  if (!m || m === 'all'){ el.hidden = true; return; }
+  el.hidden = false;
+  const [y, mo] = m.split('-').map(Number); const days = new Date(y, mo, 0).getDate();
+  const cur = m === THIS_MONTH, past = m < THIS_MONTH;
+  const L = state.lines.filter(l => !l.excluded && l.month === m);
+  const byDay = groupBy(L, l => l.date);
+  const last = g => { const ds = L.filter(l => l.group === g).map(l => l.date).sort(); return ds.length ? ds[ds.length-1] : null; };
+  const status = cur ? `Month to date · day ${NOW.getDate()} of ${days}` : (past ? 'Closed month – kept for reference' : 'Upcoming month');
+  const lastTxt = GROUPS.map(([g,ko]) => { const d = last(g); return `${ko} ${d ? 'up to ' + d.slice(5).replace('-','/') : '–'}`; }).join(' · ');
+  let cal = '';
+  for (let d = 1; d <= days; d++){
+    const iso = `${m}-${pad2(d)}`; const x = byDay.get(iso) || []; const wd = new Date(y, mo-1, d).getDay();
+    const future = iso > TODAY; const hasParcel = x.some(l => l.group === 'Parcel');
+    const gap = !future && !hasParcel && wd !== 0 && wd !== 6 && L.some(l => l.group === 'Parcel') && iso <= (last('Parcel') || '');
+    const dots = GROUPS.filter(([g]) => x.some(l => l.group === g)).map(([g,,cls]) => `<i style="--c:var(--${cls})"></i>`).join('');
+    const tip = x.length ? `${iso}: ${won(sum(x,l=>l.value))}` : (gap ? `${iso}: no 택배 file` : iso);
+    cal += `<div class="day${iso===TODAY?' today':''}${future?' future':''}${gap?' gap':''}" title="${tip}">${d}<small>${'SMTWTFS'[wd]}</small><div class="dots">${dots}</div></div>`;
+  }
+  el.innerHTML = `<div class="mstrip"><div class="bar"><h2>${monthLabel(m)}</h2><span class="pill">${status}</span><span class="spacer"></span><span class="small muted">Latest: ${lastTxt}</span></div>
+    <div class="cal" aria-label="Days with uploaded orders">${cal}</div>
+    <div class="legend">${GROUPS.map(([g,ko,cls])=>`<span style="--c:var(--${cls})">${ko}</span>`).join('')}<span style="--c:var(--warn-soft)">Weekday with no 택배 file</span></div></div>`;
+}
+function renderTiles(){
+  const L = active();
+  const loading = state.mode === 'shared' && state.month && state.month !== 'all' && !state.loadedMonths.has(state.month) && allMonths().length;
+  const t = GROUPS.map(([g,ko,cls]) => { const x = L.filter(l=>l.group===g); const np = x.filter(l=>!l.price).length;
+    return `<div class="tile ${cls}"><div class="k">${g} <span>${ko}</span></div><div class="v" title="${won(sum(x,l=>l.value))}">${loading?'…':short(sum(x,l=>l.value))}</div>
+    <div class="s">${n0(sum(x,l=>l.qty))} units · ${n0(x.length)} lines${np?` · <span style="color:var(--warn)">${np} unpriced</span>`:''}</div></div>`; }).join('');
+  const tot = sum(L,l=>l.value);
+  $('#tiles').innerHTML = t + `<div class="tile total"><div class="k">Total <span>합계</span></div><div class="v" title="${won(tot)}">${loading?'…':short(tot)}</div><div class="s">${won(tot)}${state.month&&state.month!=='all'?' · '+esc(state.month):''}</div></div>`;
+}
+function issues(){
+  const L = state.lines; const out = [];
+  const dup = L.filter(l => (l.excluded||'').startsWith('Duplicate'));
+  if (dup.length) out.push(['bad', `${dup.length} duplicate line${dup.length>1?'s':''} left out`, dup.slice(0,8).map(l=>`${l.file}: ${l.product} × ${l.qty} (${l.excluded})`)]);
+  const np = L.filter(l => !l.excluded && !l.price);
+  if (np.length) out.push(['warn', `${np.length} lines have no price, so they count as ₩0`, [canAdmin() ? 'Add prices in the Missing prices tab.' : 'An editor can add prices in the Missing prices tab.']]);
+  const unid = L.filter(l => l.channel === 'Unidentified');
+  if (unid.length) out.push(['warn', `${unid.length} 택배 lines with no channel`, unid.slice(0,6).map(l=>`${l.file}: ${l.product}`)]);
+  const tp = L.filter(l => (l.excluded||'').startsWith('Third'));
+  if (tp.length) out.push(['muted', `${tp.length} Coupang lines from other suppliers left out`, [...new Set(tp.map(l=>l.supplier))].map(s=>s+' – tick "Include non-Wellwell Coupang suppliers" to count them')]);
+  const inferred = L.filter(l => l.how === 'order-number format');
+  if (inferred.length) out.push(['muted', `${n0(inferred.length)} 택배 lines got their channel from the order-number format`, ['See the Rules tab for the patterns.']]);
+  const gifts = L.filter(l => l.gift && l.price && !l.excluded);
+  if (gifts.length) out.push(['muted', `${gifts.length} free-gift lines valued at cost`, [...new Set(gifts.map(l=>l.priceSrc))].slice(0,5)]);
+  const ff = fileRows().filter(f => (f.notes||[]).length);
+  if (ff.length) out.push(['muted', 'Notes from reading the files', ff.map(f=>`${f.fileName}: ${f.notes.join(' ')}`)]);
+  return out;
+}
+function missing(){
+  const m = groupBy(state.lines.filter(l=>!l.excluded && !l.price), l=>l.priceKey);
+  return [...m.entries()].map(([k,v]) => ({ key:k, units: sum(v,l=>l.qty), lines: v.length, groups:[...new Set(v.map(l=>l.group))], gift: v.some(l=>l.gift) })).sort((a,b)=>b.units-a.units);
+}
+function settlementsAll(){ return state.mode === 'local' ? state.localSettlements : state.settlements; }
+const TABS = [['summary','Summary'],['dates','By date'],['channels','By channel'],['products','Products'],['compare','Compare 정산'],['trends','Trends'],['missing','Missing prices'],['checks','Checks'],['rules','Rules & prices']];
+function renderTabs(){
+  const mc = missing().length, ic = issues().filter(i=>i[0]!=='muted').length, sc = Object.keys(settlementsAll()).length;
+  $('#tabs').innerHTML = TABS.map(([id,label]) => `<button role="tab" aria-selected="${state.tab===id}" data-tab="${id}">${label}${id==='missing'&&mc?`<span class="pill warn">${mc}</span>`:''}${id==='checks'&&ic?`<span class="pill bad">${ic}</span>`:''}${id==='compare'&&sc?`<span class="pill">${sc}</span>`:''}</button>`).join('');
+  $('#tabs').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; local.set('tab', state.tab); ensureMonths(); renderTabs(); renderView(); });
+}
+function emptyState(){
+  if (state.mode === 'shared' && !canWrite()) return `<div class="empty"><b>No files have been uploaded yet.</b><br>Totals appear here once a team member uploads this month's order files.</div>`;
+  return `<div class="empty"><b>No files yet.</b><br>Drop this week's order files above. The tiles fill in as each file is read: B마트, 쿠팡 and 컬리 orders go to Retail, daily 발주 files to 택배, and 슈퍼키친, 웰스토리 and N배송 files to 기타.${state.mode==='shared'?'<br>Uploaded files are saved for everyone who has access to this page.':''}</div>`;
+}
+function table(head, rows, foot){ return `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows}${foot||''}</tbody></table></div>`; }
+function monthTotals(m){ const x = state.lines.filter(l => !l.excluded && l.month === m); const o = { Retail:0, Parcel:0, Other:0 }; x.forEach(l => o[l.group] += l.value); o.total = o.Retail + o.Parcel + o.Other; return o; }
+function renderView(){
+  const v = $('#view'); const L = active();
+  if (!state.lines.length && !['rules','compare','trends'].includes(state.tab)){ v.innerHTML = emptyState(); return; }
+  if (state.tab === 'summary'){
+    const months = [...groupBy(L, l=>l.month).keys()].sort();
+    let rows = months.map(m => { const x = L.filter(l=>l.month===m); return `<tr class="sub"><td>${m}</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(x.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${n0(sum(x,l=>l.qty))}</td></tr>`; }).join('');
+    const foot = `<tr class="tot"><td>Total</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(L.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(L,l=>l.value))}</td><td class="n">${n0(sum(L,l=>l.qty))}</td></tr>`;
+    let html = `<div class="section"><h2>Value by month (₩, incl. VAT)</h2></div>` + table(`<th>Month</th>${GROUPS.map(([g,ko])=>`<th class="n">${g} ${ko}</th>`).join('')}<th class="n">Total</th><th class="n">Units</th>`, rows, foot);
+    const tg = groupBy(L.filter(l=>l.group!=='Retail'), l=>l.group+'|'+l.type);
+    if (tg.size) html += `<div class="section"><h2>택배 and 기타 by type</h2><p class="note">B2B lines found inside 택배 files are counted in 기타.</p></div>` + table('<th>Group</th><th>Type</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th>',
+      [...tg.entries()].sort().map(([k,x])=>{ const [g,t]=k.split('|'); return `<tr><td><span class="chip ${g}">${g}</span></td><td>${esc(t)}</td><td class="n">${n0(x.length)}</td><td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td></tr>`; }).join(''));
+    v.innerHTML = html; return;
+  }
+  if (state.tab === 'dates'){
+    const ds = [...groupBy(L, l=>l.date||'unknown').entries()].sort(); let run = 0, runMonth = null;
+    v.innerHTML = table(`<th>Date</th>${GROUPS.map(([g,ko])=>`<th class="n">${g} ${ko}</th>`).join('')}<th class="n">Units</th><th class="n">Day total</th><th class="n">Month to date</th>`,
+      ds.map(([d,x]) => { const wd = d!=='unknown' ? new Date(d+'T00:00').toLocaleDateString('en-US',{weekday:'short'}) : ''; if (monthOf(d) !== runMonth){ runMonth = monthOf(d); run = 0; } run += sum(x,l=>l.value); return `<tr><td>${d} <span class="muted">${wd}</span></td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(x.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${n0(run)}</td></tr>`; }).join(''),
+      `<tr class="tot"><td>Total</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(L.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(L,l=>l.qty))}</td><td class="n">${n0(sum(L,l=>l.value))}</td><td></td></tr>`);
+    return;
+  }
+  if (state.tab === 'channels'){
+    const cs = [...groupBy(L, l=>l.group+'|'+l.channel).entries()].map(([k,x])=>({g:k.split('|')[0],c:k.split('|')[1],x})).sort((a,b)=>GROUPS.findIndex(g=>g[0]===a.g)-GROUPS.findIndex(g=>g[0]===b.g) || sum(b.x,l=>l.value)-sum(a.x,l=>l.value));
+    v.innerHTML = table('<th>Group</th><th>Channel / customer</th><th>Type</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th><th class="n">Unpriced lines</th>',
+      cs.map(({g,c,x})=>`<tr><td><span class="chip ${g}">${g}</span></td><td>${esc(c)}</td><td class="muted">${esc(x[0].type)}</td><td class="n">${n0(x.length)}</td><td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${x.filter(l=>!l.price).length||''}</td></tr>`).join(''),
+      `<tr class="tot"><td colspan="3">Total</td><td class="n">${n0(L.length)}</td><td class="n">${n0(sum(L,l=>l.qty))}</td><td class="n">${n0(sum(L,l=>l.value))}</td><td></td></tr>`);
+    return;
+  }
+  if (state.tab === 'products'){
+    const ps = [...groupBy(L, l=>l.product).entries()].map(([p,x])=>({p,x})).sort((a,b)=>sum(b.x,l=>l.value)-sum(a.x,l=>l.value));
+    v.innerHTML = table('<th>Product</th><th>Groups</th><th class="n">Units</th><th class="n">Unit price</th><th class="n">Value</th><th>Price source</th>',
+      ps.map(({p,x})=>`<tr><td>${esc(p)}</td><td>${[...new Set(x.map(l=>l.group))].map(g=>`<span class="chip ${g}">${g}</span>`).join(' ')}</td><td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${x[0].price?n0(x[0].price):'<span class="chip warn">none</span>'}</td><td class="n">${n0(sum(x,l=>l.value))}</td><td class="small muted">${esc(x[0].priceSrc||'')}</td></tr>`).join(''));
+    return;
+  }
+  if (state.tab === 'compare'){ v.innerHTML = renderCompare(); return; }
+  if (state.tab === 'trends'){ v.innerHTML = renderTrends(); return; }
+  if (state.tab === 'missing'){
+    const ms = missing();
+    if (!ms.length){ v.innerHTML = '<div class="empty"><b>Every line has a price.</b></div>'; return; }
+    const ed = canAdmin();
+    v.innerHTML = `<div class="section"><p class="note">${ed ? 'Enter the factory price per unit, including VAT (the same basis as the July 위탁 단가). ' + (state.mode==='shared' ? 'Saved prices apply for the whole team straight away.' : 'Prices are saved in this browser.') + ' For a free gift, enter the cost of the product itself.' : '<span class="lock">Only an editor can set prices. Send this list to the person who manages prices.</span>'}</p></div>` +
+      table(`<th>Product (as matched)</th><th>Groups</th><th class="n">Units</th><th class="n">Lines</th>${ed?'<th>Price incl. VAT</th>':''}`,
+      ms.map((m,i)=>`<tr><td>${esc(m.key)}${m.gift?' <span class="chip warn">gift</span>':''}</td><td>${m.groups.map(g=>`<span class="chip ${g}">${g}</span>`).join(' ')}</td><td class="n">${n0(m.units)}</td><td class="n">${m.lines}</td>
+      ${ed?`<td><input type="number" min="0" step="10" id="mp${i}" data-key="${esc(m.key)}" aria-label="Price for ${esc(m.key)}"> <button data-save="${i}">Save</button></td>`:''}</tr>`).join(''));
+    v.querySelectorAll('[data-save]').forEach(b => b.onclick = () => { const inp = $('#mp'+b.dataset.save); const val = Number(inp.value); if (!(val>0)){ toast('Enter a price above 0'); return; } savePrice(inp.dataset.key, val); toast('Price saved'); });
+    return;
+  }
+  if (state.tab === 'checks'){
+    const is = issues();
+    v.innerHTML = `<div class="section"><ul class="checks" style="padding-left:18px;margin:0">${is.map(([lvl,title,items])=>`<li><b style="color:${lvl==='bad'?'var(--bad)':lvl==='warn'?'var(--warn)':'var(--ink)'}">${esc(title)}</b>${items.length?`<ul class="small muted">${items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:''}</li>`).join('') || '<li>No problems found.</li>'}</ul></div>`;
+    return;
+  }
+  if (state.tab === 'rules'){ renderRules(v); return; }
+}
+function renderCompare(){
+  const sts = settlementsAll(); const byMonth = groupBy(Object.values(sts), s => s.month);
+  if (!byMonth.size) return `<div class="empty"><b>No settlement file yet.</b><br>Upload the month-end 정산 file (the one with the 총 합계 and 위탁 sheets) to compare it with the tally from order files.${state.mode==='shared'&&!canAdmin()?'<br>Only an editor can upload it.':''}</div>`;
+  const months = [...byMonth.keys()].sort().reverse().filter(m => state.month === 'all' || m === state.month);
+  if (!months.length) return `<div class="empty">No settlement for ${esc(state.month)}. Settlements loaded: ${[...byMonth.keys()].sort().map(esc).join(', ')}.</div>`;
+  let html = `<div class="section"><p class="note">The settlement is mapped onto Retail / 택배 / 기타 on the same factory-price basis as the tally. 경한글로벌 is compared at factory price; its margin above that, the packaging fee and the management adjustment are listed separately because order files do not contain them.</p></div>`;
+  for (const m of months){
+    const list = byMonth.get(m); const g = { Retail:0, Parcel:0, Other:0, NotInOrders:0 }; const detail = [];
+    for (const st of list){ const r = Tally.settlementGroups(st, state.channelTypes); for (const k in g) g[k] += r.groups[k]; r.detail.forEach(d => detail.push(Object.assign({ site: st.site }, d))); }
+    const t = monthTotals(m); const hasOrders = orderMonths().includes(m); const loaded = state.mode === 'local' || !hasOrders || state.loadedMonths.has(m);
+    const row = (label, a, b) => { const d = b - a; const pct = a ? d / a : 0; return `<tr><td>${label}</td><td class="n">${n0(a)}</td><td class="n">${loaded?n0(b):'…'}</td><td class="n ${d>=0?'diff-pos':'diff-neg'}">${loaded?(d>=0?'+':'')+n0(d):''}</td><td class="n">${loaded&&a?(pct*100).toFixed(1)+'%':''}</td></tr>`; };
+    html += `<div class="section"><h2>${esc(m)} · settlement ${list.map(s=>esc(s.site)).join(' + ')}</h2></div>` +
+      table('<th>Group</th><th class="n">Settlement</th><th class="n">Order files (tally)</th><th class="n">Difference</th><th class="n">Tally vs settlement</th>',
+        GROUPS.map(([k,ko]) => row(`<span class="chip ${k}">${k}</span> ${ko}`, g[k], t[k])).join(''),
+        `<tr class="tot"><td>Total</td><td class="n">${n0(g.Retail+g.Parcel+g.Other)}</td><td class="n">${loaded?n0(t.total):'…'}</td><td class="n">${loaded?n0(t.total-(g.Retail+g.Parcel+g.Other)):''}</td><td></td></tr>`) +
+      (!hasOrders ? `<div class="section"><p class="note" style="color:var(--warn)">No order files have been uploaded for ${esc(m)} yet, so the tally column is empty.</p></div>` : '') +
+      `<div class="section" style="padding-top:6px"><details><summary class="small" style="cursor:pointer">Settlement lines and items not in order files (${n0(g.NotInOrders)})</summary>` +
+      table('<th>Site</th><th>Item</th><th>Group</th><th class="n">Value</th><th>Note</th>', detail.map(d=>`<tr><td>${esc(d.site)}</td><td>${esc(d.label)}</td><td>${d.group==='NotInOrders'?'<span class="muted">Not in order files</span>':`<span class="chip ${d.group}">${d.group}</span>`}</td><td class="n">${n0(d.value)}</td><td class="small muted">${esc(d.note)}</td></tr>`).join('')) + `</details></div>`;
+  }
+  return html;
+}
+function renderTrends(){
+  const months = allMonths().slice(-12);
+  if (!months.length) return emptyState();
+  const sts = settlementsAll();
+  const data = months.map(m => { const t = monthTotals(m); const st = Object.values(sts).filter(s => s.month === m); let sv = null;
+    if (st.length){ sv = 0; st.forEach(s => { const r = Tally.settlementGroups(s, state.channelTypes).groups; sv += r.Retail + r.Parcel + r.Other; }); }
+    return { m, t, sv, loaded: state.mode === 'local' || state.loadedMonths.has(m) }; });
+  const max = Math.max(1, ...data.map(d => Math.max(d.t.total, d.sv || 0)));
+  const W = Math.max(360, months.length * 90), H = 230, pl = 56, pb = 28, pt = 12, bw = Math.min(46, (W - pl) / months.length * 0.55);
+  const y = v => pt + (H - pt - pb) * (1 - v / max);
+  const ticks = [0, .25, .5, .75, 1].map(f => max * f);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Monthly value by group">`;
+  ticks.forEach(t => { svg += `<line x1="${pl}" x2="${W}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${pl-6}" y="${y(t)+4}" text-anchor="end">${t>=1e8?(t/1e8).toFixed(1)+'억':n0(t/1e4)+'만'}</text>`; });
+  data.forEach((d, i) => {
+    const cx = pl + (W - pl) / months.length * (i + .5); let base = 0;
+    for (const [g,,cls] of GROUPS){ const v = d.t[g]; if (!v) continue; svg += `<rect x="${cx-bw/2}" y="${y(base+v)}" width="${bw}" height="${y(base)-y(base+v)}" fill="var(--${cls})"><title>${d.m} ${g}: ${won(v)}</title></rect>`; base += v; }
+    if (d.sv !== null) svg += `<line x1="${cx-bw/2-6}" x2="${cx+bw/2+6}" y1="${y(d.sv)}" y2="${y(d.sv)}" stroke="var(--accent)" stroke-width="2.5"><title>${d.m} settlement: ${won(d.sv)}</title></line>`;
+    svg += `<text x="${cx}" y="${H-8}" text-anchor="middle">${d.m.slice(2)}${d.loaded?'':' …'}</text>`;
+  });
+  svg += '</svg>';
+  const legend = `<div class="legend">${GROUPS.map(([g,ko,cls])=>`<span style="--c:var(--${cls})">${g} ${ko}</span>`).join('')}<span style="--c:var(--accent)">Settlement (same basis)</span></div>`;
+  const rows = data.map(d => `<tr><td>${d.m}</td>${GROUPS.map(([g])=>`<td class="n">${d.loaded?n0(d.t[g]):'…'}</td>`).join('')}<td class="n">${d.loaded?n0(d.t.total):'…'}</td><td class="n">${d.sv!==null?n0(d.sv):''}</td></tr>`).join('');
+  return `<div class="section"><h2>Last ${months.length} month${months.length>1?'s':''}</h2>${legend}<div class="scroll">${svg}</div><p class="note">Months only partly uploaded will look low. A month marked … is still loading.</p></div>` +
+    table(`<th>Month</th>${GROUPS.map(([g,ko])=>`<th class="n">${g} ${ko}</th>`).join('')}<th class="n">Tally total</th><th class="n">Settlement</th>`, rows);
+}
+function renderRules(v){
+  const ed = canAdmin();
+  const chans = [...new Set(state.lines.filter(l=>l.cat==='Parcel').map(l=>l.channel))].sort();
+  const opts = t => ['Online','Non-sale','B2B'].map(o=>`<option ${o===t?'selected':''}>${o}</option>`).join('');
+  let html = `<div class="section"><h2>택배 channels</h2><p class="note">Online and Non-sale stay in 택배; B2B moves the line to 기타. ${state.mode==='shared'?(ed?'Changes apply for the whole team.':'<span class="lock">Only an editor can change these.</span>'):'Changes are saved in this browser.'}</p></div>`;
+  html += chans.length ? table('<th>Channel</th><th>Type</th><th class="n">Lines</th>', chans.map(c=>{ const t = state.channelTypes[c] || Tally.defaultChannelType(c); return `<tr><td>${esc(c)}</td><td>${ed?`<select data-ch="${esc(c)}" aria-label="Type for ${esc(c)}">${opts(t)}</select>`:esc(t)}</td><td class="n">${n0(state.lines.filter(l=>l.channel===c).length)}</td></tr>`; }).join('')) : '<div class="empty">Load 택배 files to see their channels.</div>';
+  html += `<div class="section"><h2>Order-number patterns</h2><p class="note">Used when a 택배 line does not name its channel. Learned from the July 위탁 sheet.</p></div>` +
+    table('<th>Pattern</th><th>Channel</th>', Tally.ORDER_RULES.map(([re,c])=>`<tr><td style="font-family:var(--mono)">${esc(re.source)}</td><td>${esc(c)}</td></tr>`).join(''));
+  const P = prices(); const keys = Object.keys(P).sort();
+  html += `<div class="section"><div class="bar"><h2>Price list</h2><span class="muted small">${keys.length} products · factory price incl. VAT</span><span class="spacer"></span>
+    ${ed?`<label class="btn" for="priceImport" style="font-size:13px">Import prices (.xlsx)</label><input type="file" id="priceImport" accept=".xlsx,.xls" hidden>`:''}
+    <button id="priceExport" style="font-size:13px">Download price list</button>
+    <label for="pq">Search <input type="text" id="pq" placeholder="product name"></label></div>
+    ${ed?'<p class="note">Import: an Excel sheet with columns "Product" and "Price" (incl. VAT). Matching products get the new price; new names are added.</p>':''}</div><div id="plist"></div>`;
+  v.innerHTML = html;
+  v.querySelectorAll('[data-ch]').forEach(s => s.onchange = () => saveChannelType(s.dataset.ch, s.value));
+  const drawP = q => { const ks = keys.filter(k=>!q || k.includes(q)).slice(0,200);
+    $('#plist').innerHTML = table(`<th>Product</th><th class="n">Price</th><th>Source</th>${ed?'<th></th>':''}`, ks.map(k=>`<tr><td>${esc(k)}</td><td class="n">${n0(P[k][0])}</td><td class="small muted">${esc(P[k][1])}</td>${ed?`<td>${state.priceOverrides[k]!==undefined?`<button class="ghost" data-undo="${esc(k)}">Undo edit</button>`:''}</td>`:''}</tr>`).join(''));
+    $('#plist').querySelectorAll('[data-undo]').forEach(b=>b.onclick=()=>savePrice(b.dataset.undo, null)); };
+  drawP(''); $('#pq').oninput = e => drawP(e.target.value.trim());
+  const imp = $('#priceImport');
+  if (imp) imp.onchange = async e => {
+    const f = e.target.files[0]; e.target.value=''; if (!f) return;
+    try{
+      const wb = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type:'array' }); const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:null });
+      const next = Object.assign({}, state.priceOverrides); let n = 0;
+      for (const r of rows){ const k = Tally.normName(r.Product ?? r['상품명'] ?? ''); const p = Number(r.Price ?? r['단가'] ?? r['가격']); if (k && p > 0){ next[k] = p; n++; } }
+      if (!n){ toast('No rows with "Product" and "Price" found'); return; }
+      if (state.mode === 'local'){ state.priceOverrides = next; local.set('prices', next); recompute(); }
+      else await retry(() => db.doc('config/prices').set({ items: next, updatedBy: state.me || null, updatedAt: new Date().toISOString() }));
+      toast(`${n} prices imported`);
+    }catch(err){ toast('Could not import: ' + (err.code || err.message)); }
+  };
+  $('#priceExport').onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Product','Price','Source']].concat(keys.map(k=>[k,P[k][0],P[k][1]]))), 'Prices'); saveWorkbook(wb, 'Wellwell_Price_List.xlsx'); };
+}
+
+// ---------- export ----------
+async function saveWorkbook(wb, fname){
+  if (!downloads){ try{ XLSX.writeFile(wb, fname); toast('Excel downloaded'); }catch(e){ toast((window.claude ? 'Download is not available in this view' : 'Download failed: ' + e.message)); } return; }
+  const data = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  try{ await downloads.save({ filename: fname, data: new Uint8Array(data) }); toast('Excel saved'); }
+  catch(e){ if (e && e.code !== 'declined') toast('Download did not complete (' + (e.code||'error') + ')'); }
+}
+$('#exportBtn').addEventListener('click', () => {
+  const L = active(); const wb = XLSX.utils.book_new();
+  const label = state.month === 'all' ? 'All months' : state.month;
+  const sumRows = [['Wellwell Monthly Tally – ' + label],['Basis: factory price (제조원가) incl. VAT'],[],['Group','Lines','Units','Value (KRW incl. VAT)']];
+  for (const [g,ko] of GROUPS){ const x = L.filter(l=>l.group===g); sumRows.push([g+' '+ko, x.length, sum(x,l=>l.qty), sum(x,l=>l.value)]); }
+  sumRows.push(['Total', L.length, sum(L,l=>l.qty), sum(L,l=>l.value)]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), 'Summary');
+  const ch = [['Group','Channel','Type','Lines','Units','Value']];
+  for (const [k,x] of groupBy(L, l=>l.group+'|'+l.channel)){ const [g,c]=k.split('|'); ch.push([g,c,x[0].type,x.length,sum(x,l=>l.qty),sum(x,l=>l.value)]); }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ch), 'By channel');
+  const ln = [['Date','Month','Group','Type','Channel','Product','Qty','Unit price','Value','Price source','File','Sheet','Reference']];
+  for (const l of L) ln.push([l.date,l.month,l.group,l.type,l.channel,l.product,l.qty,l.price||0,l.value,l.priceSrc||'NO PRICE',l.file,l.sheet||'',l.ref||'']);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ln), 'Lines');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Product','Units','Lines']].concat(missing().map(m=>[m.key,m.units,m.lines]))), 'Missing prices');
+  const sts = Object.values(settlementsAll()).filter(s => state.month === 'all' || s.month === state.month);
+  if (sts.length){
+    const cr = [['Month','Site','Item','Group','Value','Note']];
+    for (const s of sts) Tally.settlementGroups(s, state.channelTypes).detail.forEach(d => cr.push([s.month, s.site, d.label, d.group, d.value, d.note]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cr), 'Settlement mapping');
+  }
+  const ck = [['Check','Detail']]; for (const [,t,items] of issues()){ ck.push([t,'']); items.forEach(i=>ck.push(['',i])); }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ck), 'Checks');
+  saveWorkbook(wb, `Wellwell_Tally_${label.replace(/\s/g,'_')}.xlsx`);
+});
+
+init();
+</script>
+
+</body></html>

@@ -1,0 +1,578 @@
+.role{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:999px;background:var(--sunk);color:var(--muted)}
+.role i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.role.admin i{background:var(--accent)} .role.uploader i{background:var(--parcel)} .role.viewer i{background:var(--muted)} .role.local i{background:var(--warn)}
+.hdr-right{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.progress{height:4px;background:var(--sunk);border-radius:2px;overflow:hidden}
+.progress b{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c)}
+svg text{font-family:var(--sans);fill:var(--muted);font-size:11px}
+.diff-pos{color:var(--ok)} .diff-neg{color:var(--bad)}
+.cal{display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr));gap:4px}
+.day{border:1px solid var(--line);border-radius:6px;padding:3px 0 4px;text-align:center;font-size:11px;font-family:var(--mono);background:var(--surface);color:var(--ink)}
+.day small{display:block;font-family:var(--sans);font-size:9px;color:var(--muted);line-height:1.1}
+.day.today{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.day.future{opacity:.45}
+.day.gap{background:var(--warn-soft)}
+.dots{display:flex;justify-content:center;gap:2px;height:6px;margin-top:3px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--c)}
+.mstrip{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
+.mstrip h2{font-size:16px}
+.lock{font-size:12px;color:var(--muted);background:var(--sunk);padding:6px 10px;border-radius:7px}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Wellwell Monthly Tally<small>Retail · 택배 · 기타 – upload order files, get the month</small></h1>
+    <div class="hdr-right">
+      <span class="role local" id="role"><i></i><span>Starting…</span></span>
+      <span class="basis" title="All values use one basis: units × factory price (제조원가) including VAT. This is what Wellwell is paid on every channel.">Basis: factory price (제조원가) incl. VAT</span>
+    </div>
+  </header>
+
+  <label class="drop" id="drop" for="fileInput">
+    <p><b>Drop files here</b> or choose them: B마트, 쿠팡 and 컬리 orders (Retail), daily 발주 files (택배), 슈퍼키친, 웰스토리 and N배송 files (기타), and the month-end 정산 file for the Compare tab. Files are read in this browser – customer names, phones and addresses are never kept or shared.</p>
+    <span class="btn primary" role="button" id="chooseBtn">Choose files</span>
+    <input id="fileInput" type="file" accept=".xlsx,.xls,.xlsm" multiple hidden>
+  </label>
+  <div id="busy" hidden><div class="busy" id="busyText"></div><div class="progress"><b id="busyBar"></b></div></div>
+
+  <div class="bar" id="controls">
+    <label for="month">Month <select id="month"></select></label>
+    <label><input type="checkbox" id="thirdParty"> Include non-Wellwell Coupang suppliers</label>
+    <span class="spacer"></span>
+    <button id="exportBtn" class="primary" disabled>Download Excel</button>
+  </div>
+
+  <div class="panel" id="monthStrip" hidden></div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="panel">
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div id="view"></div>
+  </div>
+  <details class="panel" id="filesPanel" hidden>
+    <summary class="section" style="cursor:pointer"><span class="bar" style="display:inline-flex"><h2 id="filesTitle">Files</h2></span></summary>
+    <div class="bar" style="padding:0 16px 8px"><span class="muted small" id="filesHint"></span><span class="spacer"></span><button class="ghost" id="clearAll">Remove all files</button></div>
+    <div class="scroll"><table id="filesTable" style="min-width:900px"></table></div>
+  </details>
+  <p class="note">Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>/*CORE*/</script>
+<script>
+const BASE_PRICES = /*PRICES*/;
+const local = {
+  get(k, d){ try{ const v = localStorage.getItem('wwtally:'+k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem('wwtally:'+k, JSON.stringify(v)); }catch(e){} }
+};
+const state = {
+  mode: 'local', role: 'local', me: null,
+  tab: local.get('tab','summary'), month: null, thirdParty: false,
+  // local mode
+  localFiles: [], localSettlements: {},
+  // shared mode
+  meta: new Map(), chunks: new Map(), loadedMonths: new Set(), monthSubs: new Map(), settlements: {},
+  priceOverrides: local.get('prices', {}), channelTypes: local.get('channels', {}),
+  lines: [], names: {}, pendingRemove: null
+};
+let db = null, user = null, downloads = null;
+// Browser database for the saved-copy (local) mode, so uploads survive closing the page.
+const idb = {
+  open(){ return new Promise((res, rej) => { try{ const r = indexedDB.open('wellwell-tally', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }catch(e){ rej(e); } }); },
+  async get(k){ try{ const d = await idb.open(); return await new Promise(res => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); }); }catch(e){ return undefined; } },
+  async set(k, v){ try{ const d = await idb.open(); await new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); }); return true; }catch(e){ return false; } }
+};
+let localSaveOk = null;
+async function saveLocal(){
+  if (state.mode !== 'local') return;
+  const ok = await idb.set('files', state.localFiles) && await idb.set('settlements', state.localSettlements);
+  localSaveOk = ok; setRole('local', true);
+  if (!ok) toast('This browser would not save the files – they will be gone when the page closes');
+}
+async function loadLocal(){
+  const f = await idb.get('files'); const st = await idb.get('settlements');
+  if (Array.isArray(f)) state.localFiles = f; if (st && typeof st === 'object') state.localSettlements = st;
+  localSaveOk = f !== undefined ? true : localSaveOk;
+}
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const won = v => '₩' + Math.round(v || 0).toLocaleString('ko-KR');
+const n0 = v => Math.round(v || 0).toLocaleString('ko-KR');
+const short = v => { v = v || 0; const s = v < 0 ? '−' : ''; const a = Math.abs(v); if (a >= 1e8) return s+'₩' + (a/1e8).toFixed(2) + '억'; if (a >= 1e4) return s+'₩' + n0(a/1e4) + '만'; return s+won(a); };
+const GROUPS = [['Retail','리테일','retail'],['Parcel','택배','parcel'],['Other','기타','other']];
+const canWrite = () => state.mode === 'local' || state.role === 'admin' || state.role === 'uploader';
+const canAdmin = () => state.mode === 'local' || state.role === 'admin';
+function prices(){ const p = Object.assign({}, BASE_PRICES); for (const [k,v] of Object.entries(state.priceOverrides)) p[k] = [v, state.mode==='shared' ? 'Set by an editor' : 'Entered here']; return p; }
+function toast(msg){ const t = document.createElement('div'); t.className='toast'; t.setAttribute('role','status'); t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 3000); }
+function busy(text, frac){ $('#busy').hidden = text == null; if (text != null){ $('#busyText').textContent = text; $('#busyBar').style.width = Math.round((frac||0)*100) + '%'; } }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function retry(fn){ try{ return await fn(); }catch(e){ if (e && e.code === 'unavailable'){ await sleep(400 + Math.random()*600); return await fn(); } throw e; } }
+
+// ---------- compact storage of lines (no personal data is ever in a line) ----------
+const PACK = {cat:'c',channel:'ch',how:'h',date:'d',orderDate:'od',product:'p',qty:'q',boxes:'b',ref:'r',center:'ce',supplier:'s',thirdParty:'t',key:'k',sheet:'sh',storage:'st',expiry:'ex',market:'m'};
+const UNPACK = Object.fromEntries(Object.entries(PACK).map(([a,b])=>[b,a]));
+const pack = l => { const o = {}; for (const [a,b] of Object.entries(PACK)) if (l[a] !== undefined && l[a] !== null && l[a] !== '') o[b] = l[a]; return o; };
+const unpack = (o, fileName) => { const l = { file: fileName }; for (const [b,v] of Object.entries(o)) l[UNPACK[b]||b] = v; return l; };
+const monthOf = d => d ? d.slice(0,7) : 'unknown';
+const pad2 = n => String(n).padStart(2,'0');
+const NOW = new Date(); const TODAY = `${NOW.getFullYear()}-${pad2(NOW.getMonth()+1)}-${pad2(NOW.getDate())}`; const THIS_MONTH = TODAY.slice(0,7);
+const monthLabel = m => { if (!m || m === 'all') return 'All months'; const [y,mo] = m.split('-'); return new Date(+y, +mo-1, 1).toLocaleDateString('en-US',{ month:'long', year:'numeric' }); };
+
+// ---------- start-up: shared mode when the page runs inside Claude with shared data ----------
+async function init(){
+  render();
+  if (!(window.claude && window.claude.use)){ await loadLocal(); setRole('local'); return; }
+  try{ downloads = await window.claude.use('downloads'); }catch(e){ downloads = null; }
+  try{ db = await window.claude.use('db'); user = await window.claude.use('user'); }catch(e){ db = null; }
+  if (!db){ await loadLocal(); setRole('local'); return; }
+  state.mode = 'shared';
+  const me = user ? await user.me() : { id: null, canEdit: false };
+  state.me = me.id;
+  const w = user ? await user.can('data.write') : null;
+  setRole(me.canEdit ? 'admin' : (w === false ? 'viewer' : 'uploader'));
+  state.priceOverrides = {}; state.channelTypes = {};
+  db.doc('config/prices').onSnapshot(s => { state.priceOverrides = (s.exists && s.data().items) || {}; recompute(); }, dbErr);
+  db.doc('config/channels').onSnapshot(s => { state.channelTypes = (s.exists && s.data().types) || {}; recompute(); }, dbErr);
+  db.collection('settlements').onSnapshot(s => { state.settlements = {}; s.docs.forEach(d => state.settlements[d.id] = d.data()); recompute(); }, dbErr);
+  db.collection('files').onSnapshot(s => {
+    state.meta = new Map(s.docs.map(d => [d.id, Object.assign({ id: d.id }, d.data())]));
+    const months = orderMonths();
+    if (!state.month || (state.month !== 'all' && !allMonths().includes(state.month))) state.month = THIS_MONTH;
+    ensureMonths(); resolveNames(); recompute();
+  }, dbErr);
+}
+function dbErr(e){ if (e && e.code === 'revoked'){ setRole('viewer'); } else if (e) toast('Shared data problem: ' + (e.code || 'error')); }
+function setRole(r, quiet){
+  state.role = r; if (r === 'local') state.mode = 'local';
+  const txt = { local: localSaveOk === false ? 'Not saved – this browser blocks storage' : 'Saved in this browser only – not shared', admin: 'Editor · saved for the team', uploader: 'Contributor · saved for the team', viewer: 'View only' }[r];
+  if (quiet){ $('#role').lastElementChild.textContent = txt; return; }
+  $('#role').className = 'role ' + r; $('#role').lastElementChild.textContent = txt;
+  $('#drop').style.display = canWrite() ? '' : 'none';
+  if (r === 'local'){ state.month = state.month || THIS_MONTH; recompute(); }
+}
+async function resolveNames(){
+  if (!user) return; const ids = [...new Set([...state.meta.values()].map(m => m.uploadedBy).filter(Boolean))];
+  if (!ids.length) return; try{ const ps = await user.profiles(ids); for (const id of ids) state.names[id] = (ps[id] && ps[id].name) || 'a team member'; renderFiles(); }catch(e){}
+}
+function allMonths(){
+  const st = Object.values(settlementsAll()).map(x => x.month);
+  return [...new Set(orderMonths().concat(st, [THIS_MONTH]))].sort();
+}
+function orderMonths(){
+  if (state.mode === 'local') return [...new Set(state.localFiles.flatMap(f => f.lines.map(l => monthOf(f.shipOverride && l.cat==='Parcel' ? f.shipOverride : l.date))))].sort();
+  return [...new Set([...state.meta.values()].flatMap(m => m.months || []))].sort();
+}
+function neededMonths(){
+  const ms = orderMonths();
+  if (state.month === 'all' || state.tab === 'trends') return ms.slice(-12);
+  return state.month ? [state.month] : [];
+}
+function ensureMonths(){
+  if (state.mode !== 'shared') return;
+  const need = new Set(neededMonths());
+  if (state.monthSubs.size > 24) for (const [m, un] of state.monthSubs) if (!need.has(m)){ un(); state.monthSubs.delete(m); state.chunks.delete(m); state.loadedMonths.delete(m); }
+  for (const m of need){
+    if (state.monthSubs.has(m)) continue;
+    const unsub = db.collection('months/' + m + '/chunks').onSnapshot(s => {
+      const mp = new Map(); s.docs.forEach(d => mp.set(d.id, d.data())); state.chunks.set(m, mp); state.loadedMonths.add(m); recompute();
+    }, dbErr);
+    state.monthSubs.set(m, unsub);
+  }
+}
+
+// ---------- assemble files from local memory or shared chunks ----------
+function currentFiles(){
+  if (state.mode === 'local') return state.localFiles;
+  const byFile = new Map();
+  for (const [, mp] of state.chunks) for (const [, c] of mp){
+    const meta = state.meta.get(c.fileId); if (!meta) continue;          // only complete uploads count
+    if (!byFile.has(c.fileId)) byFile.set(c.fileId, { id: c.fileId, fileName: meta.fileName, lines: [], shipOverride: meta.shipOverride || null });
+    const f = byFile.get(c.fileId); for (const o of c.lines) f.lines.push(unpack(o, meta.fileName));
+  }
+  return [...byFile.values()].sort((a,b) => (state.meta.get(a.id).uploadedAt||'').localeCompare(state.meta.get(b.id).uploadedAt||''));
+}
+function recompute(){
+  state.lines = Tally.compute(currentFiles(), prices(), state.channelTypes, { includeThirdParty: state.thirdParty });
+  const months = allMonths();
+  if (!state.month || (state.month !== 'all' && !months.includes(state.month))) state.month = THIS_MONTH;
+  $('#month').innerHTML = [...months].reverse().map(m => `<option value="${m}">${monthLabel(m)}${m===THIS_MONTH?' – this month':''}</option>`).join('') + '<option value="all">All months</option>';
+  $('#month').value = state.month;
+  render();
+}
+
+// ---------- upload ----------
+async function sha(buf){ try{ const h = await crypto.subtle.digest('SHA-256', buf); return [...new Uint8Array(h)].slice(0,10).map(b=>b.toString(16).padStart(2,'0')).join(''); }catch(e){ return 'f' + buf.byteLength.toString(36) + Date.now().toString(36); } }
+async function addFiles(list){
+  if (!canWrite()){ toast('You can view this page but not upload. Ask the owner for Contributor access.'); return; }
+  if (typeof XLSX === 'undefined'){ toast('The Excel reader did not load. Check the connection and reload.'); return; }
+  const today = new Date().toISOString().slice(0,10);
+  let i = 0, added = 0;
+  for (const f of list){
+    i++; busy(`Reading ${f.name} (${i} of ${list.length})`, (i-1)/list.length); await sleep(10);
+    try{
+      const buf = await f.arrayBuffer(); const id = await sha(buf);
+      const known = state.mode === 'shared' ? state.meta.has(id) : state.localFiles.some(x => x.id === id);
+      if (known){ toast(f.name + ' was already uploaded – skipped'); continue; }
+      const res = Tally.parseWorkbook(XLSX, new Uint8Array(buf), f.name, today); res.id = id;
+      if (res.settlement){ await saveSettlement(res.settlement); added++; continue; }
+      if (!res.lines.length){ toast(f.name + ': ' + (res.notes[0] || 'no order lines found')); continue; }
+      if (state.mode === 'local'){ state.localFiles.push(res); added++; continue; }
+      busy(`Saving ${f.name} for the team (${i} of ${list.length})`, (i-0.5)/list.length);
+      await saveShared(res); added++;
+    }catch(e){ toast(`${f.name}: ${e.code === 'quota_exceeded' ? 'shared storage is full – remove old files first' : (e.message || e.code || 'could not be read')}`); }
+  }
+  busy(null);
+  if (state.mode === 'local'){ recompute(); if (added) await saveLocal(); }
+  if (added) toast(`${added} file${added>1?'s':''} added`);
+}
+async function writeChunks(id, lines){
+  const byMonth = new Map(); for (const l of lines){ const m = monthOf(l.date); if (!byMonth.has(m)) byMonth.set(m, []); byMonth.get(m).push(pack(l)); }
+  const paths = [];
+  for (const [m, ls] of byMonth){
+    for (let k = 0; k * 500 < ls.length; k++){
+      const path = `months/${m}/chunks/${id}_${k}`;
+      await retry(() => db.doc(path).set({ fileId: id, month: m, lines: ls.slice(k*500, (k+1)*500) }));
+      paths.push(path);
+    }
+  }
+  return { paths, months: [...byMonth.keys()] };
+}
+async function saveShared(res){
+  const { paths, months } = await writeChunks(res.id, res.lines);
+  await retry(() => db.doc('files/' + res.id).set({
+    fileName: res.fileName, kinds: res.kinds, notes: res.notes, minor: res.minor || '',
+    sheets: res.sheets.map(s => ({ name: s.name, kind: s.kind, date: s.date || null, lines: s.lines, units: s.units, shipFromName: !!s.shipFromName })),
+    months, chunks: paths, lineCount: res.lines.length, units: res.lines.reduce((a,l)=>a+l.qty,0),
+    uploadedBy: state.me || null, uploadedAt: new Date().toISOString(), shipOverride: null
+  }));
+  if (state.month !== 'all' && months.length && !months.includes(state.month)) toast(`${res.fileName} saved under ${months.map(monthLabel).join(', ')}`);
+}
+async function saveSettlement(st){
+  const id = `${st.month}_${st.site}`;
+  if (state.mode === 'local'){ state.localSettlements[id] = st; recompute(); return; }  // saved by addFiles
+  if (!canAdmin()){ toast('Only an editor can upload the month-end settlement file'); return; }
+  await retry(() => db.doc('settlements/' + id).set(Object.assign({}, st, { uploadedBy: state.me || null, uploadedAt: new Date().toISOString() })));
+}
+async function removeFile(id){
+  if (state.mode === 'local'){ state.localFiles = state.localFiles.filter(f => f.id !== id); recompute(); saveLocal(); return; }
+  const m = state.meta.get(id); if (!m) return;
+  busy('Removing ' + m.fileName, .3);
+  try{ for (const p of (m.chunks || [])) await retry(() => db.doc(p).delete()); await retry(() => db.doc('files/' + id).delete()); toast(m.fileName + ' removed'); }
+  catch(e){ toast('Could not remove: ' + (e.code || e.message)); }
+  busy(null);
+}
+async function setShipDate(id, date){
+  if (state.mode === 'local'){ const f = state.localFiles.find(x => x.id === id); if (f){ f.shipOverride = date || null; recompute(); saveLocal(); } return; }
+  const m = state.meta.get(id); if (!m) return;
+  busy('Moving ' + m.fileName + ' to ' + date, .3);
+  try{
+    const lines = []; for (const p of m.chunks){ const s = await retry(() => db.doc(p).get()); if (s.exists) s.data().lines.forEach(o => lines.push(unpack(o, m.fileName))); }
+    lines.forEach(l => { if (l.cat === 'Parcel') l.date = date; });
+    for (const p of m.chunks) await retry(() => db.doc(p).delete());
+    const { paths, months } = await writeChunks(id, lines);
+    await retry(() => db.doc('files/' + id).update({ chunks: paths, months, shipOverride: date }));
+    if (state.month !== 'all' && !months.includes(state.month)) { state.month = months[0]; } ensureMonths();
+  }catch(e){ toast('Could not change the date: ' + (e.code || e.message)); }
+  busy(null);
+}
+async function savePrice(key, val){
+  if (!canAdmin()){ toast('Only an editor can change prices'); return; }
+  const next = Object.assign({}, state.priceOverrides); if (val === null) delete next[key]; else next[key] = val;
+  if (state.mode === 'local'){ state.priceOverrides = next; local.set('prices', next); recompute(); return; }
+  try{ await retry(() => db.doc('config/prices').set({ items: next, updatedBy: state.me || null, updatedAt: new Date().toISOString() })); }catch(e){ toast('Could not save the price: ' + (e.code || e.message)); }
+}
+async function saveChannelType(ch, t){
+  if (!canAdmin()){ toast('Only an editor can change channel types'); return; }
+  const next = Object.assign({}, state.channelTypes, { [ch]: t });
+  if (state.mode === 'local'){ state.channelTypes = next; local.set('channels', next); recompute(); return; }
+  try{ await retry(() => db.doc('config/channels').set({ types: next, updatedBy: state.me || null, updatedAt: new Date().toISOString() })); }catch(e){ toast('Could not save: ' + (e.code || e.message)); }
+}
+
+// ---------- events ----------
+const drop = $('#drop');
+['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => addFiles([...ev.dataTransfer.files]));
+$('#fileInput').addEventListener('change', ev => { addFiles([...ev.target.files]); ev.target.value=''; });
+$('#clearAll').addEventListener('click', async () => {
+  if (state.pendingRemove !== 'ALL'){ state.pendingRemove = 'ALL'; $('#clearAll').textContent = 'Click again to remove all'; setTimeout(()=>{ if (state.pendingRemove==='ALL'){ state.pendingRemove=null; $('#clearAll').textContent='Remove all files'; } }, 4000); return; }
+  state.pendingRemove = null; $('#clearAll').textContent = 'Remove all files';
+  if (state.mode === 'local'){ state.localFiles = []; state.localSettlements = {}; recompute(); saveLocal(); return; }
+  for (const id of [...state.meta.keys()]) await removeFile(id);
+});
+$('#thirdParty').addEventListener('change', ev => { state.thirdParty = ev.target.checked; recompute(); });
+$('#month').addEventListener('change', ev => { state.month = ev.target.value; ensureMonths(); recompute(); });
+
+// ---------- rendering ----------
+const active = () => state.lines.filter(l => !l.excluded && (state.month === 'all' || l.month === state.month));
+function sum(arr, f){ return arr.reduce((a,x)=>a+(f(x)||0),0); }
+function groupBy(arr, kf){ const m = new Map(); for (const x of arr){ const k = kf(x); if(!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; }
+function render(){ renderFiles(); renderMonthStrip(); renderTiles(); renderTabs(); renderView(); $('#exportBtn').disabled = !state.lines.length; }
+function fileRows(){
+  if (state.mode === 'local') return state.localFiles.map(f => ({ id: f.id, fileName: f.fileName, kinds: f.kinds, sheets: f.sheets, notes: f.notes, minor: f.minor, lines: f.lines.length, units: sum(f.lines,l=>l.qty), shipOverride: f.shipOverride, mine: true }));
+  return [...state.meta.values()].sort((a,b)=>(b.uploadedAt||'').localeCompare(a.uploadedAt||'')).map(m => ({ id: m.id, fileName: m.fileName, kinds: m.kinds, sheets: m.sheets, notes: m.notes, minor: m.minor, lines: m.lineCount, units: m.units, shipOverride: m.shipOverride, by: m.uploadedBy, at: m.uploadedAt, mine: !m.uploadedBy || m.uploadedBy === state.me }));
+}
+function renderFiles(){
+  const rows = fileRows(); const p = $('#filesPanel'); p.hidden = !rows.length; if (!rows.length) return;
+  const nw = rows.filter(f => (f.notes||[]).length || (f.kinds[0]==='Parcel' && f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride)).length;
+  $('#filesTitle').innerHTML = `${state.mode==='shared'?'Team files':'Saved files'} <span class="pill">${rows.length}</span>` + (nw ? `<span class="pill warn">${nw} with notes</span>` : '') + ' <span class="muted small" style="font-weight:400">– show details</span>';
+  $('#filesHint').textContent = state.mode === 'shared' ? 'Saved permanently for the team. Every authorised person sees these files; removing a file removes it for everyone.' : 'Saved in this browser on this computer. Other people and other browsers do not see them – use the page in Claude to share.';
+  $('#clearAll').hidden = !canAdmin();
+  const body = rows.map(f => {
+    const kind = (f.kinds||[])[0] || 'Unknown';
+    const sheets = (f.sheets||[]).map(s => esc((s.kind||'').split(' · ')[1] || s.kind) + (s.date ? ' <span class="muted">' + s.date + '</span>' : '')).join('<br>');
+    const canEditRow = canAdmin() || (canWrite() && f.mine);
+    const shipVal = f.shipOverride || ((f.sheets||[])[0]||{}).date || '';
+    const ship = kind === 'Parcel' ? (canEditRow ? `<input type="date" value="${esc(shipVal)}" data-ship="${esc(f.id)}" aria-label="Ship date for ${esc(f.fileName)}">` : esc(shipVal)) + ((f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride) ? '<div class="small" style="color:var(--warn)">No date in file name – check</div>' : '') : '';
+    const who = state.mode === 'shared' ? `<div class="small muted">${esc(f.by ? (state.names[f.by] || 'a team member') : '')}${f.at ? ' · ' + esc(f.at.slice(0,16).replace('T',' ')) : ''}</div>` : '';
+    const rm = canEditRow ? `<button class="ghost" data-rm="${esc(f.id)}">${state.pendingRemove===f.id?'Confirm remove':'Remove'}</button>` : '';
+    return `<tr><td>${esc(f.fileName)}${who}</td><td><span class="chip ${esc(kind)}">${esc(kind)}</span></td><td>${sheets || '<span class="muted">–</span>'}</td><td>${ship}</td>
+      <td class="n">${n0(f.lines)}</td><td class="n">${n0(f.units)}</td><td class="small muted" style="max-width:320px">${(f.notes||[]).map(esc).join('<br>')}${f.minor?`<div>${esc(f.minor)}</div>`:''}</td><td>${rm}</td></tr>`;
+  }).join('');
+  $('#filesTable').innerHTML = `<thead><tr><th>File</th><th>Type</th><th>Read as</th><th>Ship date</th><th class="n">Lines</th><th class="n">Units</th><th>Notes</th><th></th></tr></thead><tbody>${body}</tbody>`;
+  $('#filesTable').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
+    const id = b.dataset.rm;
+    if (state.pendingRemove !== id){ state.pendingRemove = id; renderFiles(); setTimeout(()=>{ if (state.pendingRemove===id){ state.pendingRemove=null; renderFiles(); } }, 4000); return; }
+    state.pendingRemove = null; removeFile(id);
+  });
+  $('#filesTable').querySelectorAll('[data-ship]').forEach(inp => inp.onchange = () => { if (inp.value) setShipDate(inp.dataset.ship, inp.value); });
+}
+function renderMonthStrip(){
+  const el = $('#monthStrip'); const m = state.month;
+  if (!m || m === 'all'){ el.hidden = true; return; }
+  el.hidden = false;
+  const [y, mo] = m.split('-').map(Number); const days = new Date(y, mo, 0).getDate();
+  const cur = m === THIS_MONTH, past = m < THIS_MONTH;
+  const L = state.lines.filter(l => !l.excluded && l.month === m);
+  const byDay = groupBy(L, l => l.date);
+  const last = g => { const ds = L.filter(l => l.group === g).map(l => l.date).sort(); return ds.length ? ds[ds.length-1] : null; };
+  const status = cur ? `Month to date · day ${NOW.getDate()} of ${days}` : (past ? 'Closed month – kept for reference' : 'Upcoming month');
+  const lastTxt = GROUPS.map(([g,ko]) => { const d = last(g); return `${ko} ${d ? 'up to ' + d.slice(5).replace('-','/') : '–'}`; }).join(' · ');
+  let cal = '';
+  for (let d = 1; d <= days; d++){
+    const iso = `${m}-${pad2(d)}`; const x = byDay.get(iso) || []; const wd = new Date(y, mo-1, d).getDay();
+    const future = iso > TODAY; const hasParcel = x.some(l => l.group === 'Parcel');
+    const gap = !future && !hasParcel && wd !== 0 && wd !== 6 && L.some(l => l.group === 'Parcel') && iso <= (last('Parcel') || '');
+    const dots = GROUPS.filter(([g]) => x.some(l => l.group === g)).map(([g,,cls]) => `<i style="--c:var(--${cls})"></i>`).join('');
+    const tip = x.length ? `${iso}: ${won(sum(x,l=>l.value))}` : (gap ? `${iso}: no 택배 file` : iso);
+    cal += `<div class="day${iso===TODAY?' today':''}${future?' future':''}${gap?' gap':''}" title="${tip}">${d}<small>${'SMTWTFS'[wd]}</small><div class="dots">${dots}</div></div>`;
+  }
+  el.innerHTML = `<div class="mstrip"><div class="bar"><h2>${monthLabel(m)}</h2><span class="pill">${status}</span><span class="spacer"></span><span class="small muted">Latest: ${lastTxt}</span></div>
+    <div class="cal" aria-label="Days with uploaded orders">${cal}</div>
+    <div class="legend">${GROUPS.map(([g,ko,cls])=>`<span style="--c:var(--${cls})">${ko}</span>`).join('')}<span style="--c:var(--warn-soft)">Weekday with no 택배 file</span></div></div>`;
+}
+function renderTiles(){
+  const L = active();
+  const loading = state.mode === 'shared' && state.month && state.month !== 'all' && !state.loadedMonths.has(state.month) && allMonths().length;
+  const t = GROUPS.map(([g,ko,cls]) => { const x = L.filter(l=>l.group===g); const np = x.filter(l=>!l.price).length;
+    return `<div class="tile ${cls}"><div class="k">${g} <span>${ko}</span></div><div class="v" title="${won(sum(x,l=>l.value))}">${loading?'…':short(sum(x,l=>l.value))}</div>
+    <div class="s">${n0(sum(x,l=>l.qty))} units · ${n0(x.length)} lines${np?` · <span style="color:var(--warn)">${np} unpriced</span>`:''}</div></div>`; }).join('');
+  const tot = sum(L,l=>l.value);
+  $('#tiles').innerHTML = t + `<div class="tile total"><div class="k">Total <span>합계</span></div><div class="v" title="${won(tot)}">${loading?'…':short(tot)}</div><div class="s">${won(tot)}${state.month&&state.month!=='all'?' · '+esc(state.month):''}</div></div>`;
+}
+function issues(){
+  const L = state.lines; const out = [];
+  const dup = L.filter(l => (l.excluded||'').startsWith('Duplicate'));
+  if (dup.length) out.push(['bad', `${dup.length} duplicate line${dup.length>1?'s':''} left out`, dup.slice(0,8).map(l=>`${l.file}: ${l.product} × ${l.qty} (${l.excluded})`)]);
+  const np = L.filter(l => !l.excluded && !l.price);
+  if (np.length) out.push(['warn', `${np.length} lines have no price, so they count as ₩0`, [canAdmin() ? 'Add prices in the Missing prices tab.' : 'An editor can add prices in the Missing prices tab.']]);
+  const unid = L.filter(l => l.channel === 'Unidentified');
+  if (unid.length) out.push(['warn', `${unid.length} 택배 lines with no channel`, unid.slice(0,6).map(l=>`${l.file}: ${l.product}`)]);
+  const tp = L.filter(l => (l.excluded||'').startsWith('Third'));
+  if (tp.length) out.push(['muted', `${tp.length} Coupang lines from other suppliers left out`, [...new Set(tp.map(l=>l.supplier))].map(s=>s+' – tick "Include non-Wellwell Coupang suppliers" to count them')]);
+  const inferred = L.filter(l => l.how === 'order-number format');
+  if (inferred.length) out.push(['muted', `${n0(inferred.length)} 택배 lines got their channel from the order-number format`, ['See the Rules tab for the patterns.']]);
+  const gifts = L.filter(l => l.gift && l.price && !l.excluded);
+  if (gifts.length) out.push(['muted', `${gifts.length} free-gift lines valued at cost`, [...new Set(gifts.map(l=>l.priceSrc))].slice(0,5)]);
+  const ff = fileRows().filter(f => (f.notes||[]).length);
+  if (ff.length) out.push(['muted', 'Notes from reading the files', ff.map(f=>`${f.fileName}: ${f.notes.join(' ')}`)]);
+  return out;
+}
+function missing(){
+  const m = groupBy(state.lines.filter(l=>!l.excluded && !l.price), l=>l.priceKey);
+  return [...m.entries()].map(([k,v]) => ({ key:k, units: sum(v,l=>l.qty), lines: v.length, groups:[...new Set(v.map(l=>l.group))], gift: v.some(l=>l.gift) })).sort((a,b)=>b.units-a.units);
+}
+function settlementsAll(){ return state.mode === 'local' ? state.localSettlements : state.settlements; }
+const TABS = [['summary','Summary'],['dates','By date'],['channels','By channel'],['products','Products'],['compare','Compare 정산'],['trends','Trends'],['missing','Missing prices'],['checks','Checks'],['rules','Rules & prices']];
+function renderTabs(){
+  const mc = missing().length, ic = issues().filter(i=>i[0]!=='muted').length, sc = Object.keys(settlementsAll()).length;
+  $('#tabs').innerHTML = TABS.map(([id,label]) => `<button role="tab" aria-selected="${state.tab===id}" data-tab="${id}">${label}${id==='missing'&&mc?`<span class="pill warn">${mc}</span>`:''}${id==='checks'&&ic?`<span class="pill bad">${ic}</span>`:''}${id==='compare'&&sc?`<span class="pill">${sc}</span>`:''}</button>`).join('');
+  $('#tabs').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; local.set('tab', state.tab); ensureMonths(); renderTabs(); renderView(); });
+}
+function emptyState(){
+  if (state.mode === 'shared' && !canWrite()) return `<div class="empty"><b>No files have been uploaded yet.</b><br>Totals appear here once a team member uploads this month's order files.</div>`;
+  return `<div class="empty"><b>No files yet.</b><br>Drop this week's order files above. The tiles fill in as each file is read: B마트, 쿠팡 and 컬리 orders go to Retail, daily 발주 files to 택배, and 슈퍼키친, 웰스토리 and N배송 files to 기타.${state.mode==='shared'?'<br>Uploaded files are saved for everyone who has access to this page.':''}</div>`;
+}
+function table(head, rows, foot){ return `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows}${foot||''}</tbody></table></div>`; }
+function monthTotals(m){ const x = state.lines.filter(l => !l.excluded && l.month === m); const o = { Retail:0, Parcel:0, Other:0 }; x.forEach(l => o[l.group] += l.value); o.total = o.Retail + o.Parcel + o.Other; return o; }
+function renderView(){
+  const v = $('#view'); const L = active();
+  if (!state.lines.length && !['rules','compare','trends'].includes(state.tab)){ v.innerHTML = emptyState(); return; }
+  if (state.tab === 'summary'){
+    const months = [...groupBy(L, l=>l.month).keys()].sort();
+    let rows = months.map(m => { const x = L.filter(l=>l.month===m); return `<tr class="sub"><td>${m}</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(x.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${n0(sum(x,l=>l.qty))}</td></tr>`; }).join('');
+    const foot = `<tr class="tot"><td>Total</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(L.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(L,l=>l.value))}</td><td class="n">${n0(sum(L,l=>l.qty))}</td></tr>`;
+    let html = `<div class="section"><h2>Value by month (₩, incl. VAT)</h2></div>` + table(`<th>Month</th>${GROUPS.map(([g,ko])=>`<th class="n">${g} ${ko}</th>`).join('')}<th class="n">Total</th><th class="n">Units</th>`, rows, foot);
+    const tg = groupBy(L.filter(l=>l.group!=='Retail'), l=>l.group+'|'+l.type);
+    if (tg.size) html += `<div class="section"><h2>택배 and 기타 by type</h2><p class="note">B2B lines found inside 택배 files are counted in 기타.</p></div>` + table('<th>Group</th><th>Type</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th>',
+      [...tg.entries()].sort().map(([k,x])=>{ const [g,t]=k.split('|'); return `<tr><td><span class="chip ${g}">${g}</span></td><td>${esc(t)}</td><td class="n">${n0(x.length)}</td><td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td></tr>`; }).join(''));
+    v.innerHTML = html; return;
+  }
+  if (state.tab === 'dates'){
+    const ds = [...groupBy(L, l=>l.date||'unknown').entries()].sort(); let run = 0, runMonth = null;
+    v.innerHTML = table(`<th>Date</th>${GROUPS.map(([g,ko])=>`<th class="n">${g} ${ko}</th>`).join('')}<th class="n">Units</th><th class="n">Day total</th><th class="n">Month to date</th>`,
+      ds.map(([d,x]) => { const wd = d!=='unknown' ? new Date(d+'T00:00').toLocaleDateString('en-US',{weekday:'short'}) : ''; if (monthOf(d) !== runMonth){ runMonth = monthOf(d); run = 0; } run += sum(x,l=>l.value); return `<tr><td>${d} <span class="muted">${wd}</span></td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(x.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${n0(run)}</td></tr>`; }).join(''),
+      `<tr class="tot"><td>Total</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(L.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(L,l=>l.qty))}</td><td class="n">${n0(sum(L,l=>l.value))}</td><td></td></tr>`);
+    return;
+  }
+  if (state.tab === 'channels'){
+    const cs = [...groupBy(L, l=>l.group+'|'+l.channel).entries()].map(([k,x])=>({g:k.split('|')[0],c:k.split('|')[1],x})).sort((a,b)=>GROUPS.findIndex(g=>g[0]===a.g)-GROUPS.findIndex(g=>g[0]===b.g) || sum(b.x,l=>l.value)-sum(a.x,l=>l.value));
+    v.innerHTML = table('<th>Group</th><th>Channel / customer</th><th>Type</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th><th class="n">Unpriced lines</th>',
+      cs.map(({g,c,x})=>`<tr><td><span class="chip ${g}">${g}</span></td><td>${esc(c)}</td><td class="muted">${esc(x[0].type)}</td><td class="n">${n0(x.length)}</td><td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${x.filter(l=>!l.price).length||''}</td></tr>`).join(''),
+      `<tr class="tot"><td colspan="3">Total</td><td class="n">${n0(L.length)}</td><td class="n">${n0(sum(L,l=>l.qty))}</td><td class="n">${n0(sum(L,l=>l.value))}</td><td></td></tr>`);
+    return;
+  }
+  if (state.tab === 'products'){
+    const ps = [...groupBy(L, l=>l.product).entries()].map(([p,x])=>({p,x})).sort((a,b)=>sum(b.x,l=>l.value)-sum(a.x,l=>l.value));
+    v.innerHTML = table('<th>Product</th><th>Groups</th><th class="n">Units</th><th class="n">Unit price</th><th class="n">Value</th><th>Price source</th>',
+      ps.map(({p,x})=>`<tr><td>${esc(p)}</td><td>${[...new Set(x.map(l=>l.group))].map(g=>`<span class="chip ${g}">${g}</span>`).join(' ')}</td><td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${x[0].price?n0(x[0].price):'<span class="chip warn">none</span>'}</td><td class="n">${n0(sum(x,l=>l.value))}</td><td class="small muted">${esc(x[0].priceSrc||'')}</td></tr>`).join(''));
+    return;
+  }
+  if (state.tab === 'compare'){ v.innerHTML = renderCompare(); return; }
+  if (state.tab === 'trends'){ v.innerHTML = renderTrends(); return; }
+  if (state.tab === 'missing'){
+    const ms = missing();
+    if (!ms.length){ v.innerHTML = '<div class="empty"><b>Every line has a price.</b></div>'; return; }
+    const ed = canAdmin();
+    v.innerHTML = `<div class="section"><p class="note">${ed ? 'Enter the factory price per unit, including VAT (the same basis as the July 위탁 단가). ' + (state.mode==='shared' ? 'Saved prices apply for the whole team straight away.' : 'Prices are saved in this browser.') + ' For a free gift, enter the cost of the product itself.' : '<span class="lock">Only an editor can set prices. Send this list to the person who manages prices.</span>'}</p></div>` +
+      table(`<th>Product (as matched)</th><th>Groups</th><th class="n">Units</th><th class="n">Lines</th>${ed?'<th>Price incl. VAT</th>':''}`,
+      ms.map((m,i)=>`<tr><td>${esc(m.key)}${m.gift?' <span class="chip warn">gift</span>':''}</td><td>${m.groups.map(g=>`<span class="chip ${g}">${g}</span>`).join(' ')}</td><td class="n">${n0(m.units)}</td><td class="n">${m.lines}</td>
+      ${ed?`<td><input type="number" min="0" step="10" id="mp${i}" data-key="${esc(m.key)}" aria-label="Price for ${esc(m.key)}"> <button data-save="${i}">Save</button></td>`:''}</tr>`).join(''));
+    v.querySelectorAll('[data-save]').forEach(b => b.onclick = () => { const inp = $('#mp'+b.dataset.save); const val = Number(inp.value); if (!(val>0)){ toast('Enter a price above 0'); return; } savePrice(inp.dataset.key, val); toast('Price saved'); });
+    return;
+  }
+  if (state.tab === 'checks'){
+    const is = issues();
+    v.innerHTML = `<div class="section"><ul class="checks" style="padding-left:18px;margin:0">${is.map(([lvl,title,items])=>`<li><b style="color:${lvl==='bad'?'var(--bad)':lvl==='warn'?'var(--warn)':'var(--ink)'}">${esc(title)}</b>${items.length?`<ul class="small muted">${items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:''}</li>`).join('') || '<li>No problems found.</li>'}</ul></div>`;
+    return;
+  }
+  if (state.tab === 'rules'){ renderRules(v); return; }
+}
+function renderCompare(){
+  const sts = settlementsAll(); const byMonth = groupBy(Object.values(sts), s => s.month);
+  if (!byMonth.size) return `<div class="empty"><b>No settlement file yet.</b><br>Upload the month-end 정산 file (the one with the 총 합계 and 위탁 sheets) to compare it with the tally from order files.${state.mode==='shared'&&!canAdmin()?'<br>Only an editor can upload it.':''}</div>`;
+  const months = [...byMonth.keys()].sort().reverse().filter(m => state.month === 'all' || m === state.month);
+  if (!months.length) return `<div class="empty">No settlement for ${esc(state.month)}. Settlements loaded: ${[...byMonth.keys()].sort().map(esc).join(', ')}.</div>`;
+  let html = `<div class="section"><p class="note">The settlement is mapped onto Retail / 택배 / 기타 on the same factory-price basis as the tally. 경한글로벌 is compared at factory price; its margin above that, the packaging fee and the management adjustment are listed separately because order files do not contain them.</p></div>`;
+  for (const m of months){
+    const list = byMonth.get(m); const g = { Retail:0, Parcel:0, Other:0, NotInOrders:0 }; const detail = [];
+    for (const st of list){ const r = Tally.settlementGroups(st, state.channelTypes); for (const k in g) g[k] += r.groups[k]; r.detail.forEach(d => detail.push(Object.assign({ site: st.site }, d))); }
+    const t = monthTotals(m); const hasOrders = orderMonths().includes(m); const loaded = state.mode === 'local' || !hasOrders || state.loadedMonths.has(m);
+    const row = (label, a, b) => { const d = b - a; const pct = a ? d / a : 0; return `<tr><td>${label}</td><td class="n">${n0(a)}</td><td class="n">${loaded?n0(b):'…'}</td><td class="n ${d>=0?'diff-pos':'diff-neg'}">${loaded?(d>=0?'+':'')+n0(d):''}</td><td class="n">${loaded&&a?(pct*100).toFixed(1)+'%':''}</td></tr>`; };
+    html += `<div class="section"><h2>${esc(m)} · settlement ${list.map(s=>esc(s.site)).join(' + ')}</h2></div>` +
+      table('<th>Group</th><th class="n">Settlement</th><th class="n">Order files (tally)</th><th class="n">Difference</th><th class="n">Tally vs settlement</th>',
+        GROUPS.map(([k,ko]) => row(`<span class="chip ${k}">${k}</span> ${ko}`, g[k], t[k])).join(''),
+        `<tr class="tot"><td>Total</td><td class="n">${n0(g.Retail+g.Parcel+g.Other)}</td><td class="n">${loaded?n0(t.total):'…'}</td><td class="n">${loaded?n0(t.total-(g.Retail+g.Parcel+g.Other)):''}</td><td></td></tr>`) +
+      (!hasOrders ? `<div class="section"><p class="note" style="color:var(--warn)">No order files have been uploaded for ${esc(m)} yet, so the tally column is empty.</p></div>` : '') +
+      `<div class="section" style="padding-top:6px"><details><summary class="small" style="cursor:pointer">Settlement lines and items not in order files (${n0(g.NotInOrders)})</summary>` +
+      table('<th>Site</th><th>Item</th><th>Group</th><th class="n">Value</th><th>Note</th>', detail.map(d=>`<tr><td>${esc(d.site)}</td><td>${esc(d.label)}</td><td>${d.group==='NotInOrders'?'<span class="muted">Not in order files</span>':`<span class="chip ${d.group}">${d.group}</span>`}</td><td class="n">${n0(d.value)}</td><td class="small muted">${esc(d.note)}</td></tr>`).join('')) + `</details></div>`;
+  }
+  return html;
+}
+function renderTrends(){
+  const months = allMonths().slice(-12);
+  if (!months.length) return emptyState();
+  const sts = settlementsAll();
+  const data = months.map(m => { const t = monthTotals(m); const st = Object.values(sts).filter(s => s.month === m); let sv = null;
+    if (st.length){ sv = 0; st.forEach(s => { const r = Tally.settlementGroups(s, state.channelTypes).groups; sv += r.Retail + r.Parcel + r.Other; }); }
+    return { m, t, sv, loaded: state.mode === 'local' || state.loadedMonths.has(m) }; });
+  const max = Math.max(1, ...data.map(d => Math.max(d.t.total, d.sv || 0)));
+  const W = Math.max(360, months.length * 90), H = 230, pl = 56, pb = 28, pt = 12, bw = Math.min(46, (W - pl) / months.length * 0.55);
+  const y = v => pt + (H - pt - pb) * (1 - v / max);
+  const ticks = [0, .25, .5, .75, 1].map(f => max * f);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Monthly value by group">`;
+  ticks.forEach(t => { svg += `<line x1="${pl}" x2="${W}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${pl-6}" y="${y(t)+4}" text-anchor="end">${t>=1e8?(t/1e8).toFixed(1)+'억':n0(t/1e4)+'만'}</text>`; });
+  data.forEach((d, i) => {
+    const cx = pl + (W - pl) / months.length * (i + .5); let base = 0;
+    for (const [g,,cls] of GROUPS){ const v = d.t[g]; if (!v) continue; svg += `<rect x="${cx-bw/2}" y="${y(base+v)}" width="${bw}" height="${y(base)-y(base+v)}" fill="var(--${cls})"><title>${d.m} ${g}: ${won(v)}</title></rect>`; base += v; }
+    if (d.sv !== null) svg += `<line x1="${cx-bw/2-6}" x2="${cx+bw/2+6}" y1="${y(d.sv)}" y2="${y(d.sv)}" stroke="var(--accent)" stroke-width="2.5"><title>${d.m} settlement: ${won(d.sv)}</title></line>`;
+    svg += `<text x="${cx}" y="${H-8}" text-anchor="middle">${d.m.slice(2)}${d.loaded?'':' …'}</text>`;
+  });
+  svg += '</svg>';
+  const legend = `<div class="legend">${GROUPS.map(([g,ko,cls])=>`<span style="--c:var(--${cls})">${g} ${ko}</span>`).join('')}<span style="--c:var(--accent)">Settlement (same basis)</span></div>`;
+  const rows = data.map(d => `<tr><td>${d.m}</td>${GROUPS.map(([g])=>`<td class="n">${d.loaded?n0(d.t[g]):'…'}</td>`).join('')}<td class="n">${d.loaded?n0(d.t.total):'…'}</td><td class="n">${d.sv!==null?n0(d.sv):''}</td></tr>`).join('');
+  return `<div class="section"><h2>Last ${months.length} month${months.length>1?'s':''}</h2>${legend}<div class="scroll">${svg}</div><p class="note">Months only partly uploaded will look low. A month marked … is still loading.</p></div>` +
+    table(`<th>Month</th>${GROUPS.map(([g,ko])=>`<th class="n">${g} ${ko}</th>`).join('')}<th class="n">Tally total</th><th class="n">Settlement</th>`, rows);
+}
+function renderRules(v){
+  const ed = canAdmin();
+  const chans = [...new Set(state.lines.filter(l=>l.cat==='Parcel').map(l=>l.channel))].sort();
+  const opts = t => ['Online','Non-sale','B2B'].map(o=>`<option ${o===t?'selected':''}>${o}</option>`).join('');
+  let html = `<div class="section"><h2>택배 channels</h2><p class="note">Online and Non-sale stay in 택배; B2B moves the line to 기타. ${state.mode==='shared'?(ed?'Changes apply for the whole team.':'<span class="lock">Only an editor can change these.</span>'):'Changes are saved in this browser.'}</p></div>`;
+  html += chans.length ? table('<th>Channel</th><th>Type</th><th class="n">Lines</th>', chans.map(c=>{ const t = state.channelTypes[c] || Tally.defaultChannelType(c); return `<tr><td>${esc(c)}</td><td>${ed?`<select data-ch="${esc(c)}" aria-label="Type for ${esc(c)}">${opts(t)}</select>`:esc(t)}</td><td class="n">${n0(state.lines.filter(l=>l.channel===c).length)}</td></tr>`; }).join('')) : '<div class="empty">Load 택배 files to see their channels.</div>';
+  html += `<div class="section"><h2>Order-number patterns</h2><p class="note">Used when a 택배 line does not name its channel. Learned from the July 위탁 sheet.</p></div>` +
+    table('<th>Pattern</th><th>Channel</th>', Tally.ORDER_RULES.map(([re,c])=>`<tr><td style="font-family:var(--mono)">${esc(re.source)}</td><td>${esc(c)}</td></tr>`).join(''));
+  const P = prices(); const keys = Object.keys(P).sort();
+  html += `<div class="section"><div class="bar"><h2>Price list</h2><span class="muted small">${keys.length} products · factory price incl. VAT</span><span class="spacer"></span>
+    ${ed?`<label class="btn" for="priceImport" style="font-size:13px">Import prices (.xlsx)</label><input type="file" id="priceImport" accept=".xlsx,.xls" hidden>`:''}
+    <button id="priceExport" style="font-size:13px">Download price list</button>
+    <label for="pq">Search <input type="text" id="pq" placeholder="product name"></label></div>
+    ${ed?'<p class="note">Import: an Excel sheet with columns "Product" and "Price" (incl. VAT). Matching products get the new price; new names are added.</p>':''}</div><div id="plist"></div>`;
+  v.innerHTML = html;
+  v.querySelectorAll('[data-ch]').forEach(s => s.onchange = () => saveChannelType(s.dataset.ch, s.value));
+  const drawP = q => { const ks = keys.filter(k=>!q || k.includes(q)).slice(0,200);
+    $('#plist').innerHTML = table(`<th>Product</th><th class="n">Price</th><th>Source</th>${ed?'<th></th>':''}`, ks.map(k=>`<tr><td>${esc(k)}</td><td class="n">${n0(P[k][0])}</td><td class="small muted">${esc(P[k][1])}</td>${ed?`<td>${state.priceOverrides[k]!==undefined?`<button class="ghost" data-undo="${esc(k)}">Undo edit</button>`:''}</td>`:''}</tr>`).join(''));
+    $('#plist').querySelectorAll('[data-undo]').forEach(b=>b.onclick=()=>savePrice(b.dataset.undo, null)); };
+  drawP(''); $('#pq').oninput = e => drawP(e.target.value.trim());
+  const imp = $('#priceImport');
+  if (imp) imp.onchange = async e => {
+    const f = e.target.files[0]; e.target.value=''; if (!f) return;
+    try{
+      const wb = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type:'array' }); const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval:null });
+      const next = Object.assign({}, state.priceOverrides); let n = 0;
+      for (const r of rows){ const k = Tally.normName(r.Product ?? r['상품명'] ?? ''); const p = Number(r.Price ?? r['단가'] ?? r['가격']); if (k && p > 0){ next[k] = p; n++; } }
+      if (!n){ toast('No rows with "Product" and "Price" found'); return; }
+      if (state.mode === 'local'){ state.priceOverrides = next; local.set('prices', next); recompute(); }
+      else await retry(() => db.doc('config/prices').set({ items: next, updatedBy: state.me || null, updatedAt: new Date().toISOString() }));
+      toast(`${n} prices imported`);
+    }catch(err){ toast('Could not import: ' + (err.code || err.message)); }
+  };
+  $('#priceExport').onclick = () => { const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Product','Price','Source']].concat(keys.map(k=>[k,P[k][0],P[k][1]]))), 'Prices'); saveWorkbook(wb, 'Wellwell_Price_List.xlsx'); };
+}
+
+// ---------- export ----------
+async function saveWorkbook(wb, fname){
+  if (!downloads){ try{ XLSX.writeFile(wb, fname); toast('Excel downloaded'); }catch(e){ toast((window.claude ? 'Download is not available in this view' : 'Download failed: ' + e.message)); } return; }
+  const data = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  try{ await downloads.save({ filename: fname, data: new Uint8Array(data) }); toast('Excel saved'); }
+  catch(e){ if (e && e.code !== 'declined') toast('Download did not complete (' + (e.code||'error') + ')'); }
+}
+$('#exportBtn').addEventListener('click', () => {
+  const L = active(); const wb = XLSX.utils.book_new();
+  const label = state.month === 'all' ? 'All months' : state.month;
+  const sumRows = [['Wellwell Monthly Tally – ' + label],['Basis: factory price (제조원가) incl. VAT'],[],['Group','Lines','Units','Value (KRW incl. VAT)']];
+  for (const [g,ko] of GROUPS){ const x = L.filter(l=>l.group===g); sumRows.push([g+' '+ko, x.length, sum(x,l=>l.qty), sum(x,l=>l.value)]); }
+  sumRows.push(['Total', L.length, sum(L,l=>l.qty), sum(L,l=>l.value)]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), 'Summary');
+  const ch = [['Group','Channel','Type','Lines','Units','Value']];
+  for (const [k,x] of groupBy(L, l=>l.group+'|'+l.channel)){ const [g,c]=k.split('|'); ch.push([g,c,x[0].type,x.length,sum(x,l=>l.qty),sum(x,l=>l.value)]); }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ch), 'By channel');
+  const ln = [['Date','Month','Group','Type','Channel','Product','Qty','Unit price','Value','Price source','File','Sheet','Reference']];
+  for (const l of L) ln.push([l.date,l.month,l.group,l.type,l.channel,l.product,l.qty,l.price||0,l.value,l.priceSrc||'NO PRICE',l.file,l.sheet||'',l.ref||'']);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ln), 'Lines');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Product','Units','Lines']].concat(missing().map(m=>[m.key,m.units,m.lines]))), 'Missing prices');
+  const sts = Object.values(settlementsAll()).filter(s => state.month === 'all' || s.month === state.month);
+  if (sts.length){
+    const cr = [['Month','Site','Item','Group','Value','Note']];
+    for (const s of sts) Tally.settlementGroups(s, state.channelTypes).detail.forEach(d => cr.push([s.month, s.site, d.label, d.group, d.value, d.note]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cr), 'Settlement mapping');
+  }
+  const ck = [['Check','Detail']]; for (const [,t,items] of issues()){ ck.push([t,'']); items.forEach(i=>ck.push(['',i])); }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ck), 'Checks');
+  saveWorkbook(wb, `Wellwell_Tally_${label.replace(/\s/g,'_')}.xlsx`);
+});
+
+init();
+</script>
