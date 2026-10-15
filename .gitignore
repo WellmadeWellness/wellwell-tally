@@ -8,3 +8,4 @@ __pycache__/
 
 # Company price list – kept out of the public repository
 data/prices.json
+build/

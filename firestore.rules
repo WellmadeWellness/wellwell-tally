@@ -1,0 +1,27 @@
+rules_version = '2';
+// Wellwell Monthly Tally – who may read and write what.
+// A person gets access only when an admin adds their email to the "roles" collection.
+// Roles: admin (prices, rules, team, settlements), uploader (order files), viewer (read only).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function myRole() {
+      return signedIn() && exists(/databases/$(database)/documents/roles/$(myEmail()))
+        ? get(/databases/$(database)/documents/roles/$(myEmail())).data.role : 'none';
+    }
+    function isMember()   { return myRole() in ['admin', 'uploader', 'viewer']; }
+    function isUploader() { return myRole() in ['admin', 'uploader']; }
+    function isAdmin()    { return myRole() == 'admin'; }
+
+    match /roles/{email} {
+      allow read: if signedIn() && (email == myEmail() || isAdmin());
+      allow write: if isAdmin()
+        && (request.resource == null || request.resource.data.role in ['admin', 'uploader', 'viewer']);
+    }
+    match /config/{doc}        { allow read: if isMember(); allow write: if isAdmin(); }
+    match /settlements/{doc}   { allow read: if isMember(); allow write: if isAdmin(); }
+    match /files/{doc}         { allow read: if isMember(); allow write: if isUploader(); }
+    match /months/{month}/chunks/{chunk} { allow read: if isMember(); allow write: if isUploader(); }
+  }
+}

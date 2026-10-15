@@ -18,22 +18,28 @@ Customer names, phone numbers and addresses in the 발주 files are read in the 
 ## Where data is kept
 | Where the page runs | Where uploads are saved |
 |---|---|
-| As a Claude artifact | Shared online storage – the whole team sees the same data; editors manage prices |
-| On GitHub Pages, from a file or any other website | This browser only (IndexedDB) – not shared |
+| **GitHub Pages + Firebase** (main setup) | Firebase (Google's free database) – permanent, shared by the team; people sign in with Google or email; admins manage prices and the team |
+| As a Claude artifact | Claude's shared storage |
+| Without Firebase settings, or from a saved file | This browser only (IndexedDB) – not shared |
+
+**Setup:** follow [SETUP.md](SETUP.md).
 
 ## Prices
-This public repository contains **no prices**. On the website, open **Rules & prices → Import prices (.xlsx)** and load an Excel sheet with the columns `Product` and `Price` (factory price incl. VAT). The prices are kept in that browser. The company price list is kept outside this repository.
+This public repository contains **no prices**. An admin opens **Rules & prices → Import prices (.xlsx)** once and loads an Excel sheet with the columns `Product` and `Price` (factory price incl. VAT). The prices are stored in Firebase for the whole team, never in GitHub.
 
 ## Build
 ```
-python scripts/build.py --public
+python scripts/build.py            # docs/index.html – served by GitHub Pages
+python scripts/build.py --claude   # build/claude.html – the Claude artifact version
 ```
-The output is `docs/index.html`, one self-contained file, which GitHub Pages serves. SheetJS 0.18.5 is loaded from cdnjs. To build a private copy with prices built in, put the price list at `data/prices.json` (it is git-ignored) and run `python scripts/build.py`.
+SheetJS 0.18.5 is loaded from cdnjs and the Firebase SDK 10.12.2 from gstatic.
 
 ## Files
 - `src/core.js` – file recognition, parsing, pricing and totals (no UI)
 - `src/head.part`, `src/body.part` – page styles, layout and UI script
 - `scripts/build.py` – assembles `docs/index.html`
+- `docs/firebase-config.js` – your Firebase project settings (fill in during setup)
+- `firestore.rules` – who may read and write what
 
 ## Rules in short
 - One price basis everywhere: units × factory price incl. VAT.

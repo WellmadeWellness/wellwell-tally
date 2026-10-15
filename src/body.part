@@ -18,6 +18,12 @@ svg text{font-family:var(--sans);fill:var(--muted);font-size:11px}
 .dots i{width:6px;height:6px;border-radius:50%;background:var(--c)}
 .mstrip{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
 .mstrip h2{font-size:16px}
+.locked #controls,.locked #tiles,.locked #monthStrip,.locked #mainPanel,.locked #filesPanel,.locked .note.rules{display:none!important}
+.auth{display:flex;flex-direction:column;gap:12px;padding:20px;max-width:440px}
+.auth h2{font-size:17px}
+.auth input[type=email],.auth input[type=password]{width:100%;padding:8px 10px}
+.auth .row{display:flex;gap:8px;flex-wrap:wrap}
+.auth .err{color:var(--bad);font-size:13px;min-height:1em}
 .lock{font-size:12px;color:var(--muted);background:var(--sunk);padding:6px 10px;border-radius:7px}
 </style>
 
@@ -26,10 +32,12 @@ svg text{font-family:var(--sans);fill:var(--muted);font-size:11px}
     <h1>Wellwell Monthly Tally<small>Retail · 택배 · 기타 – upload order files, get the month</small></h1>
     <div class="hdr-right">
       <span class="role local" id="role"><i></i><span>Starting…</span></span>
+      <button class="ghost" id="signOut" hidden>Sign out</button>
       <span class="basis" title="All values use one basis: units × factory price (제조원가) including VAT. This is what Wellwell is paid on every channel.">Basis: factory price (제조원가) incl. VAT</span>
     </div>
   </header>
 
+  <div class="panel" id="authPanel" hidden></div>
   <label class="drop" id="drop" for="fileInput">
     <p><b>Drop files here</b> or choose them: B마트, 쿠팡 and 컬리 orders (Retail), daily 발주 files (택배), 슈퍼키친, 웰스토리 and N배송 files (기타), and the month-end 정산 file for the Compare tab. Files are read in this browser – customer names, phones and addresses are never kept or shared.</p>
     <span class="btn primary" role="button" id="chooseBtn">Choose files</span>
@@ -47,7 +55,7 @@ svg text{font-family:var(--sans);fill:var(--muted);font-size:11px}
   <div class="panel" id="monthStrip" hidden></div>
   <div class="tiles" id="tiles"></div>
 
-  <div class="panel">
+  <div class="panel" id="mainPanel">
     <div class="tabs" role="tablist" id="tabs"></div>
     <div id="view"></div>
   </div>
@@ -56,7 +64,7 @@ svg text{font-family:var(--sans);fill:var(--muted);font-size:11px}
     <div class="bar" style="padding:0 16px 8px"><span class="muted small" id="filesHint"></span><span class="spacer"></span><button class="ghost" id="clearAll">Remove all files</button></div>
     <div class="scroll"><table id="filesTable" style="min-width:900px"></table></div>
   </details>
-  <p class="note">Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.</p>
+  <p class="note rules">Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -115,6 +123,8 @@ const PACK = {cat:'c',channel:'ch',how:'h',date:'d',orderDate:'od',product:'p',q
 const UNPACK = Object.fromEntries(Object.entries(PACK).map(([a,b])=>[b,a]));
 const pack = l => { const o = {}; for (const [a,b] of Object.entries(PACK)) if (l[a] !== undefined && l[a] !== null && l[a] !== '') o[b] = l[a]; return o; };
 const unpack = (o, fileName) => { const l = { file: fileName }; for (const [b,v] of Object.entries(o)) l[UNPACK[b]||b] = v; return l; };
+// Lines are stored as one JSON text per chunk (keeps Firebase from indexing every field).
+const chunkLines = c => c.json ? JSON.parse(c.json) : (c.lines || []);
 const monthOf = d => d ? d.slice(0,7) : 'unknown';
 const pad2 = n => String(n).padStart(2,'0');
 const NOW = new Date(); const TODAY = `${NOW.getFullYear()}-${pad2(NOW.getMonth()+1)}-${pad2(NOW.getDate())}`; const THIS_MONTH = TODAY.slice(0,7);
@@ -123,15 +133,18 @@ const monthLabel = m => { if (!m || m === 'all') return 'All months'; const [y,m
 // ---------- start-up: shared mode when the page runs inside Claude with shared data ----------
 async function init(){
   render();
-  if (!(window.claude && window.claude.use)){ await loadLocal(); setRole('local'); return; }
+  if (window.FIREBASE_CONFIG && window.firebase && !/YOUR_/.test(JSON.stringify(window.FIREBASE_CONFIG))) return initFirebase();
+  if (!(window.claude && window.claude.use)){ await loadLocal(); setRole('local'); if (window.FIREBASE_CONFIG) toast('Firebase is not set up yet – working in this browser only'); return; }
   try{ downloads = await window.claude.use('downloads'); }catch(e){ downloads = null; }
   try{ db = await window.claude.use('db'); user = await window.claude.use('user'); }catch(e){ db = null; }
   if (!db){ await loadLocal(); setRole('local'); return; }
-  state.mode = 'shared';
   const me = user ? await user.me() : { id: null, canEdit: false };
-  state.me = me.id;
   const w = user ? await user.can('data.write') : null;
-  setRole(me.canEdit ? 'admin' : (w === false ? 'viewer' : 'uploader'));
+  startShared(me.id, null, me.canEdit ? 'admin' : (w === false ? 'viewer' : 'uploader'));
+}
+function startShared(meId, meEmail, role){
+  state.mode = 'shared'; state.me = meId; state.meEmail = meEmail;
+  setRole(role);
   state.priceOverrides = {}; state.channelTypes = {};
   db.doc('config/prices').onSnapshot(s => { state.priceOverrides = (s.exists && s.data().items) || {}; recompute(); }, dbErr);
   db.doc('config/channels').onSnapshot(s => { state.channelTypes = (s.exists && s.data().types) || {}; recompute(); }, dbErr);
@@ -143,7 +156,7 @@ async function init(){
     ensureMonths(); resolveNames(); recompute();
   }, dbErr);
 }
-function dbErr(e){ if (e && e.code === 'revoked'){ setRole('viewer'); } else if (e) toast('Shared data problem: ' + (e.code || 'error')); }
+function dbErr(e){ if (e && e.code === 'revoked'){ setRole('viewer'); } else if (e && e.code === 'permission-denied') toast('Your account does not have access to this data. Ask an admin.'); else if (e) toast('Shared data problem: ' + (e.code || 'error')); }
 function setRole(r, quiet){
   state.role = r; if (r === 'local') state.mode = 'local';
   const txt = { local: localSaveOk === false ? 'Not saved – this browser blocks storage' : 'Saved in this browser only – not shared', admin: 'Editor · saved for the team', uploader: 'Contributor · saved for the team', viewer: 'View only' }[r];
@@ -189,7 +202,7 @@ function currentFiles(){
   for (const [, mp] of state.chunks) for (const [, c] of mp){
     const meta = state.meta.get(c.fileId); if (!meta) continue;          // only complete uploads count
     if (!byFile.has(c.fileId)) byFile.set(c.fileId, { id: c.fileId, fileName: meta.fileName, lines: [], shipOverride: meta.shipOverride || null });
-    const f = byFile.get(c.fileId); for (const o of c.lines) f.lines.push(unpack(o, meta.fileName));
+    const f = byFile.get(c.fileId); for (const o of chunkLines(c)) f.lines.push(unpack(o, meta.fileName));
   }
   return [...byFile.values()].sort((a,b) => (state.meta.get(a.id).uploadedAt||'').localeCompare(state.meta.get(b.id).uploadedAt||''));
 }
@@ -233,7 +246,7 @@ async function writeChunks(id, lines){
   for (const [m, ls] of byMonth){
     for (let k = 0; k * 500 < ls.length; k++){
       const path = `months/${m}/chunks/${id}_${k}`;
-      await retry(() => db.doc(path).set({ fileId: id, month: m, lines: ls.slice(k*500, (k+1)*500) }));
+      await retry(() => db.doc(path).set({ fileId: id, month: m, json: JSON.stringify(ls.slice(k*500, (k+1)*500)) }));
       paths.push(path);
     }
   }
@@ -245,7 +258,7 @@ async function saveShared(res){
     fileName: res.fileName, kinds: res.kinds, notes: res.notes, minor: res.minor || '',
     sheets: res.sheets.map(s => ({ name: s.name, kind: s.kind, date: s.date || null, lines: s.lines, units: s.units, shipFromName: !!s.shipFromName })),
     months, chunks: paths, lineCount: res.lines.length, units: res.lines.reduce((a,l)=>a+l.qty,0),
-    uploadedBy: state.me || null, uploadedAt: new Date().toISOString(), shipOverride: null
+    uploadedBy: state.me || null, uploadedByEmail: state.meEmail || null, uploadedAt: new Date().toISOString(), shipOverride: null
   }));
   if (state.month !== 'all' && months.length && !months.includes(state.month)) toast(`${res.fileName} saved under ${months.map(monthLabel).join(', ')}`);
 }
@@ -268,7 +281,7 @@ async function setShipDate(id, date){
   const m = state.meta.get(id); if (!m) return;
   busy('Moving ' + m.fileName + ' to ' + date, .3);
   try{
-    const lines = []; for (const p of m.chunks){ const s = await retry(() => db.doc(p).get()); if (s.exists) s.data().lines.forEach(o => lines.push(unpack(o, m.fileName))); }
+    const lines = []; for (const p of m.chunks){ const s = await retry(() => db.doc(p).get()); if (s.exists) chunkLines(s.data()).forEach(o => lines.push(unpack(o, m.fileName))); }
     lines.forEach(l => { if (l.cat === 'Parcel') l.date = date; });
     for (const p of m.chunks) await retry(() => db.doc(p).delete());
     const { paths, months } = await writeChunks(id, lines);
@@ -312,7 +325,7 @@ function groupBy(arr, kf){ const m = new Map(); for (const x of arr){ const k = 
 function render(){ renderFiles(); renderMonthStrip(); renderTiles(); renderTabs(); renderView(); $('#exportBtn').disabled = !state.lines.length; }
 function fileRows(){
   if (state.mode === 'local') return state.localFiles.map(f => ({ id: f.id, fileName: f.fileName, kinds: f.kinds, sheets: f.sheets, notes: f.notes, minor: f.minor, lines: f.lines.length, units: sum(f.lines,l=>l.qty), shipOverride: f.shipOverride, mine: true }));
-  return [...state.meta.values()].sort((a,b)=>(b.uploadedAt||'').localeCompare(a.uploadedAt||'')).map(m => ({ id: m.id, fileName: m.fileName, kinds: m.kinds, sheets: m.sheets, notes: m.notes, minor: m.minor, lines: m.lineCount, units: m.units, shipOverride: m.shipOverride, by: m.uploadedBy, at: m.uploadedAt, mine: !m.uploadedBy || m.uploadedBy === state.me }));
+  return [...state.meta.values()].sort((a,b)=>(b.uploadedAt||'').localeCompare(a.uploadedAt||'')).map(m => ({ id: m.id, fileName: m.fileName, kinds: m.kinds, sheets: m.sheets, notes: m.notes, minor: m.minor, lines: m.lineCount, units: m.units, shipOverride: m.shipOverride, by: m.uploadedBy, byEmail: m.uploadedByEmail, at: m.uploadedAt, mine: !m.uploadedBy || m.uploadedBy === state.me }));
 }
 function renderFiles(){
   const rows = fileRows(); const p = $('#filesPanel'); p.hidden = !rows.length; if (!rows.length) return;
@@ -326,7 +339,7 @@ function renderFiles(){
     const canEditRow = canAdmin() || (canWrite() && f.mine);
     const shipVal = f.shipOverride || ((f.sheets||[])[0]||{}).date || '';
     const ship = kind === 'Parcel' ? (canEditRow ? `<input type="date" value="${esc(shipVal)}" data-ship="${esc(f.id)}" aria-label="Ship date for ${esc(f.fileName)}">` : esc(shipVal)) + ((f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride) ? '<div class="small" style="color:var(--warn)">No date in file name – check</div>' : '') : '';
-    const who = state.mode === 'shared' ? `<div class="small muted">${esc(f.by ? (state.names[f.by] || 'a team member') : '')}${f.at ? ' · ' + esc(f.at.slice(0,16).replace('T',' ')) : ''}</div>` : '';
+    const who = state.mode === 'shared' ? `<div class="small muted">${esc(f.byEmail || (f.by ? (state.names[f.by] || 'a team member') : ''))}${f.at ? ' · ' + esc(f.at.slice(0,16).replace('T',' ')) : ''}</div>` : '';
     const rm = canEditRow ? `<button class="ghost" data-rm="${esc(f.id)}">${state.pendingRemove===f.id?'Confirm remove':'Remove'}</button>` : '';
     return `<tr><td>${esc(f.fileName)}${who}</td><td><span class="chip ${esc(kind)}">${esc(kind)}</span></td><td>${sheets || '<span class="muted">–</span>'}</td><td>${ship}</td>
       <td class="n">${n0(f.lines)}</td><td class="n">${n0(f.units)}</td><td class="small muted" style="max-width:320px">${(f.notes||[]).map(esc).join('<br>')}${f.minor?`<div>${esc(f.minor)}</div>`:''}</td><td>${rm}</td></tr>`;
@@ -395,8 +408,9 @@ function missing(){
   return [...m.entries()].map(([k,v]) => ({ key:k, units: sum(v,l=>l.qty), lines: v.length, groups:[...new Set(v.map(l=>l.group))], gift: v.some(l=>l.gift) })).sort((a,b)=>b.units-a.units);
 }
 function settlementsAll(){ return state.mode === 'local' ? state.localSettlements : state.settlements; }
-const TABS = [['summary','Summary'],['dates','By date'],['channels','By channel'],['products','Products'],['compare','Compare 정산'],['trends','Trends'],['missing','Missing prices'],['checks','Checks'],['rules','Rules & prices']];
+const TABS0 = [['summary','Summary'],['dates','By date'],['channels','By channel'],['products','Products'],['compare','Compare 정산'],['trends','Trends'],['missing','Missing prices'],['checks','Checks'],['rules','Rules & prices']];
 function renderTabs(){
+  const TABS = TABS0.concat(state.backend === 'firebase' && state.role === 'admin' ? [['team','Team']] : []);
   const mc = missing().length, ic = issues().filter(i=>i[0]!=='muted').length, sc = Object.keys(settlementsAll()).length;
   $('#tabs').innerHTML = TABS.map(([id,label]) => `<button role="tab" aria-selected="${state.tab===id}" data-tab="${id}">${label}${id==='missing'&&mc?`<span class="pill warn">${mc}</span>`:''}${id==='checks'&&ic?`<span class="pill bad">${ic}</span>`:''}${id==='compare'&&sc?`<span class="pill">${sc}</span>`:''}</button>`).join('');
   $('#tabs').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; local.set('tab', state.tab); ensureMonths(); renderTabs(); renderView(); });
@@ -409,7 +423,7 @@ function table(head, rows, foot){ return `<div class="scroll"><table><thead><tr>
 function monthTotals(m){ const x = state.lines.filter(l => !l.excluded && l.month === m); const o = { Retail:0, Parcel:0, Other:0 }; x.forEach(l => o[l.group] += l.value); o.total = o.Retail + o.Parcel + o.Other; return o; }
 function renderView(){
   const v = $('#view'); const L = active();
-  if (!state.lines.length && !['rules','compare','trends'].includes(state.tab)){ v.innerHTML = emptyState(); return; }
+  if (!state.lines.length && !['rules','compare','trends','team'].includes(state.tab)){ v.innerHTML = emptyState(); return; }
   if (state.tab === 'summary'){
     const months = [...groupBy(L, l=>l.month).keys()].sort();
     let rows = months.map(m => { const x = L.filter(l=>l.month===m); return `<tr class="sub"><td>${m}</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(x.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${n0(sum(x,l=>l.qty))}</td></tr>`; }).join('');
@@ -459,6 +473,7 @@ function renderView(){
     return;
   }
   if (state.tab === 'rules'){ renderRules(v); return; }
+  if (state.tab === 'team'){ renderTeam(v); return; }
 }
 function renderCompare(){
   const sts = settlementsAll(); const byMonth = groupBy(Object.values(sts), s => s.month);
@@ -573,6 +588,107 @@ $('#exportBtn').addEventListener('click', () => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ck), 'Checks');
   saveWorkbook(wb, `Wellwell_Tally_${label.replace(/\s/g,'_')}.xlsx`);
 });
+
+// ================= Firebase backend (GitHub Pages hosting) =================
+// The page talks to Firebase through the same small interface it uses inside Claude:
+// db.doc(path).get/set/update/delete/onSnapshot and db.collection(path).onSnapshot.
+let fb = null;
+function fbDb(fs){
+  const wrapErr = e => ({ code: (e && e.code) || 'error', message: e && e.message });
+  const docRef = path => { const r = fs.doc(path); return {
+    path, id: r.id,
+    get: () => r.get().catch(e => { throw wrapErr(e); }),
+    set: d => r.set(d).catch(e => { throw wrapErr(e); }),
+    update: d => r.update(d).catch(e => { throw wrapErr(e); }),
+    delete: () => r.delete().catch(e => { throw wrapErr(e); }),
+    onSnapshot: (next, err) => r.onSnapshot(next, e => err && err(wrapErr(e)))
+  }; };
+  const coll = path => { const c = fs.collection(path); return {
+    path, doc: id => docRef(path + '/' + id),
+    get: () => c.get().catch(e => { throw wrapErr(e); }),
+    onSnapshot: (next, err) => c.onSnapshot(next, e => err && err(wrapErr(e)))
+  }; };
+  return { doc: docRef, collection: coll };
+}
+function authPanel(html){ const p = $('#authPanel'); p.hidden = !html; document.body.classList.toggle('locked', !!html); p.innerHTML = html || ''; $('#drop').style.display = html ? 'none' : (canWrite() ? '' : 'none'); }
+async function initFirebase(){
+  state.backend = 'firebase'; state.mode = 'shared';
+  try{ firebase.initializeApp(window.FIREBASE_CONFIG); }catch(e){ if (!/already exists/.test(e.message)){ toast('Firebase setup error: ' + e.message); await loadLocal(); setRole('local'); return; } }
+  const auth = firebase.auth(); const fs = firebase.firestore();
+  fb = { auth, fs };
+  $('#signOut').onclick = () => auth.signOut().then(() => location.reload());
+  $('#role').lastElementChild.textContent = 'Checking sign-in…';
+  auth.onAuthStateChanged(async u => {
+    if (!u){ showSignIn(); return; }
+    $('#signOut').hidden = false;
+    const isPassword = u.providerData.some(p => p.providerId === 'password');
+    if (isPassword && !u.emailVerified){ showVerify(u); return; }
+    const email = (u.email || '').toLowerCase();
+    let role = null;
+    try{ const r = await fs.doc('roles/' + email).get(); role = r.exists ? r.data().role : null; }catch(e){ role = null; }
+    if (!['admin','uploader','viewer'].includes(role)){
+      authPanel(`<div class="auth"><h2>Signed in as ${esc(email)}</h2><p>This account is not on the team list yet, so it cannot see the data. Ask an admin to add <b>${esc(email)}</b> in the Team tab, then reload this page.</p><div class="row"><button id="reloadBtn">Reload</button></div></div>`);
+      setRole('viewer'); $('#role').lastElementChild.textContent = 'No access yet';
+      $('#reloadBtn').onclick = () => location.reload(); return;
+    }
+    authPanel(null);
+    db = fbDb(fs); user = null;
+    startShared(u.uid, email, role);
+    const txt = { admin: 'Admin', uploader: 'Uploader', viewer: 'Viewer' }[role];
+    $('#role').lastElementChild.textContent = `${txt} · ${email}`;
+    $('#drop').style.display = canWrite() ? '' : 'none';
+  });
+}
+function showSignIn(mode){
+  setRole('viewer'); $('#role').lastElementChild.textContent = 'Not signed in'; $('#signOut').hidden = true;
+  const create = mode === 'create';
+  authPanel(`<form class="auth" id="authForm" novalidate>
+    <h2>${create ? 'Create an account' : 'Sign in to Wellwell Monthly Tally'}</h2>
+    <p class="note">Only people on the team list can see the data. ${create ? 'After creating the account, confirm your email, then ask an admin to add you.' : ''}</p>
+    <button type="button" id="googleBtn">Continue with Google</button>
+    <div class="muted small">or with email</div>
+    <label for="authEmail">Email <input type="email" id="authEmail" autocomplete="email" required></label>
+    <label for="authPass">Password <input type="password" id="authPass" autocomplete="${create?'new-password':'current-password'}" minlength="6" required></label>
+    <div class="err" id="authErr" role="alert"></div>
+    <div class="row"><button class="primary" type="submit">${create ? 'Create account' : 'Sign in'}</button>
+    <button type="button" class="ghost" id="switchBtn">${create ? 'I already have an account' : 'Create an account'}</button>
+    ${create ? '' : '<button type="button" class="ghost" id="resetBtn">Forgot password</button>'}</div></form>`);
+  const err = m => { $('#authErr').textContent = m; };
+  const nice = e => ({ 'auth/invalid-credential':'Wrong email or password.', 'auth/wrong-password':'Wrong email or password.', 'auth/user-not-found':'No account with that email.', 'auth/email-already-in-use':'That email already has an account – sign in instead.', 'auth/weak-password':'Use at least 6 characters.', 'auth/invalid-email':'That email address is not valid.', 'auth/popup-closed-by-user':'The Google window was closed.', 'auth/unauthorized-domain':'This web address is not allowed in Firebase yet (Authentication → Settings → Authorized domains).' }[e.code] || e.message);
+  $('#googleBtn').onclick = () => fb.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e => err(nice(e)));
+  $('#switchBtn').onclick = () => showSignIn(create ? null : 'create');
+  if ($('#resetBtn')) $('#resetBtn').onclick = () => { const em = $('#authEmail').value.trim(); if (!em){ err('Type your email first.'); return; } fb.auth.sendPasswordResetEmail(em).then(() => err('A reset link was sent to ' + em + '.')).catch(e => err(nice(e))); };
+  $('#authForm').onsubmit = async ev => { ev.preventDefault(); err('');
+    const em = $('#authEmail').value.trim(), pw = $('#authPass').value;
+    try{
+      if (create){ const c = await fb.auth.createUserWithEmailAndPassword(em, pw); await c.user.sendEmailVerification(); }
+      else await fb.auth.signInWithEmailAndPassword(em, pw);
+    }catch(e){ err(nice(e)); } };
+}
+function showVerify(u){
+  setRole('viewer'); $('#role').lastElementChild.textContent = 'Email not confirmed';
+  authPanel(`<div class="auth"><h2>Confirm your email</h2><p>We sent a link to <b>${esc(u.email)}</b>. Open it, then click Continue.</p><div class="err" id="vErr"></div>
+    <div class="row"><button class="primary" id="vCont">Continue</button><button class="ghost" id="vSend">Send the link again</button></div></div>`);
+  $('#vCont').onclick = async () => { await u.reload(); if (fb.auth.currentUser.emailVerified){ await fb.auth.currentUser.getIdToken(true); location.reload(); } else $('#vErr').textContent = 'Not confirmed yet.'; };
+  $('#vSend').onclick = () => u.sendEmailVerification().then(() => $('#vErr').textContent = 'Sent.').catch(e => $('#vErr').textContent = e.message);
+}
+let teamCache = null;
+function renderTeam(v){
+  if (!fb){ v.innerHTML = ''; return; }
+  const draw = () => {
+    const rows = (teamCache || []).map(t => `<tr><td>${esc(t.id)}</td><td><select data-role="${esc(t.id)}" aria-label="Role for ${esc(t.id)}">${['admin','uploader','viewer'].map(r=>`<option ${r===t.role?'selected':''}>${r}</option>`).join('')}</select></td><td>${t.id===state.meEmail?'<span class="muted small">you</span>':`<button class="ghost" data-del="${esc(t.id)}">Remove</button>`}</td></tr>`).join('');
+    v.innerHTML = `<div class="section"><h2>Team</h2><p class="note">Admins change prices, rules and the team, and upload settlements. Uploaders add and remove their own order files. Viewers only look. A person signs in with this exact email (Google or email + password).</p>
+      <form class="bar" id="addForm"><label for="newEmail">Email <input type="email" id="newEmail" required placeholder="name@wellwell.co.kr"></label>
+      <label for="newRole">Role <select id="newRole"><option>uploader</option><option>viewer</option><option>admin</option></select></label><button class="primary" type="submit">Add</button></form></div>` +
+      (teamCache ? table('<th>Email</th><th>Role</th><th></th>', rows) : '<div class="empty">Loading…</div>');
+    v.querySelector('#addForm').onsubmit = async e => { e.preventDefault(); const em = $('#newEmail').value.trim().toLowerCase(); if (!/^[^@\s/]+@[^@\s/]+\.[^@\s/]+$/.test(em)){ toast('Enter a valid email'); return; }
+      try{ await fb.fs.doc('roles/' + em).set({ role: $('#newRole').value, addedBy: state.meEmail, addedAt: new Date().toISOString() }); toast(em + ' added'); }catch(err){ toast('Could not add: ' + err.code); } };
+    v.querySelectorAll('[data-role]').forEach(sel => sel.onchange = () => fb.fs.doc('roles/' + sel.dataset.role).update({ role: sel.value }).then(() => toast('Role changed')).catch(e => toast('Could not change: ' + e.code)));
+    v.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { if (b.dataset.confirm){ fb.fs.doc('roles/' + b.dataset.del).delete().then(() => toast('Removed')).catch(e => toast('Could not remove: ' + e.code)); } else { b.dataset.confirm = 1; b.textContent = 'Confirm remove'; } });
+  };
+  if (!renderTeam.sub){ renderTeam.sub = fb.fs.collection('roles').onSnapshot(s => { teamCache = s.docs.map(d => ({ id: d.id, role: d.data().role })).sort((a,b)=>a.id.localeCompare(b.id)); if (state.tab === 'team') draw(); }, e => toast('Could not read the team list: ' + e.code)); }
+  draw();
+}
 
 init();
 </script>
