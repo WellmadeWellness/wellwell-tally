@@ -92,7 +92,7 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
     <label><input type="checkbox" id="thirdParty"> Include non-Wellwell Coupang suppliers</label>
     <span class="spacer"></span>
     <button id="filesBtn" type="button" hidden aria-controls="filesPanel">Uploaded files <span class="pill" id="filesCount">0</span></button>
-    <button id="exportBtn" class="primary" disabled title="All uploaded data for the selected month (or day) in one Excel file">Download month report</button>
+    <button id="exportBtn" class="primary" disabled title="All uploaded data for the selected month in one Excel file">Download month report</button>
   </div>
 
   <div class="panel" id="monthStrip" hidden></div>
@@ -478,12 +478,13 @@ function renderMonthStrip(){
   }
   if (state.day && state.day.slice(0,7) !== m) state.day = null;
   const dl = state.day ? L.filter(l => l.date === state.day) : [];
-  const dayBar = state.day ? `<div class="daybar" role="status"><b>Showing ${esc(dayLabel(state.day))} only</b><span>${GROUPS.map(([g,ko]) => `${ko} ${won(sum(dl.filter(l=>l.group===g),l=>l.value))}`).join(' · ')} · ${n0(sum(dl,l=>l.qty))} units</span><span class="spacer"></span><button type="button" id="wholeMonth">Show whole month</button></div><div class="daylist"><h2 style="margin:4px 0 6px">Products on ${esc(dayLabel(state.day))}</h2>${dayProductsTable(state.day)}</div>` : '';
+  const dayBar = state.day ? `<div class="daybar" role="status"><b>Showing ${esc(dayLabel(state.day))} only</b><span>${GROUPS.map(([g,ko]) => `${ko} ${won(sum(dl.filter(l=>l.group===g),l=>l.value))}`).join(' · ')} · ${n0(sum(dl,l=>l.qty))} units</span><span class="spacer"></span><button type="button" id="dayReport">Download this day</button><button type="button" id="wholeMonth">Show whole month</button></div><div class="daylist"><h2 style="margin:4px 0 6px">Products on ${esc(dayLabel(state.day))}</h2>${dayProductsTable(state.day)}</div>` : '';
   el.innerHTML = `<div class="mstrip"><div class="bar"><h2>${monthLabel(m)}</h2><span class="pill">${status}</span><span class="spacer"></span><span class="small muted">Latest: ${lastTxt}</span></div>
     <div class="cal" aria-label="Days of ${monthLabel(m)} – click a day to see only that day">${cal}</div>${dayBar}
     <div class="legend">${GROUPS.map(([g,ko,cls])=>`<span style="--c:var(--${cls})">${ko}</span>`).join('')}<span style="--c:var(--warn-soft)">Weekday with no 택배 file</span><span style="--c:var(--accent)">Selected day</span></div></div>`;
   el.querySelectorAll('[data-day]').forEach(b => b.onclick = () => pickDay(b.dataset.day));
   const wm = el.querySelector('#wholeMonth'); if (wm) wm.onclick = () => pickDay(state.day);
+  const dr = el.querySelector('#dayReport'); if (dr) dr.onclick = () => exportReport(state.day);
 }
 function renderTiles(){
   const L = active();
@@ -676,11 +677,13 @@ async function saveWorkbook(wb, fname){
   try{ await downloads.save({ filename: fname, data: new Uint8Array(data) }); toast('Excel saved'); }
   catch(e){ if (e && e.code !== 'declined') toast('Download did not complete (' + (e.code||'error') + ')'); }
 }
-$('#exportBtn').addEventListener('click', () => {
+function exportReport(day){
   // Month-end report: everything uploaded for the selected month (or day), one workbook.
-  const L = active(); const wb = XLSX.utils.book_new(); const vw = isViewer();
-  const label = state.day || (state.month === 'all' ? 'All months' : state.month);
-  const title = state.day ? dayLabel(state.day) : (state.month === 'all' ? 'All months' : monthLabel(state.month));
+  // Month report = whole selected month (ignores the calendar day). Day report = one day.
+  const L = state.lines.filter(l => !l.excluded && (day ? l.date === day : (state.month === 'all' || l.month === state.month)));
+  const wb = XLSX.utils.book_new(); const vw = isViewer();
+  const label = day || (state.month === 'all' ? 'All months' : state.month);
+  const title = day ? dayLabel(day) : (state.month === 'all' ? 'All months' : monthLabel(state.month));
   const SHEET_KO = { 'By day': '일별', 'By product': '제품별', 'Settlement': '정산', 'Missing prices': '가격 없음', 'Checks': '점검', '리테일 Retail': '리테일', '택배 Parcel': '택배', '기타 Other': '기타' };
   const sheet = (rows, name, widths) => { if (isKo()){ rows = rows.map(r => r.map(c => typeof c === 'string' ? trText(c) : c)); name = SHEET_KO[name] || name; } const ws = XLSX.utils.aoa_to_sheet(rows); if (widths) ws['!cols'] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, name); };
   // 1. Summary (총 합계 style): groups, then channels inside each group
@@ -729,8 +732,9 @@ $('#exportBtn').addEventListener('click', () => {
   if (!vw && missing().length) sheet([['Product','Units','Lines']].concat(missing().map(m=>[m.key,m.units,m.lines])), 'Missing prices', [44,10,8]);
   const ck = [['Check','Detail']]; for (const [,t,items] of issues()){ ck.push([t,'']); items.forEach(i=>ck.push(['',i])); }
   if (!vw) sheet(ck, 'Checks', [50,80]);
-  saveWorkbook(wb, `Wellwell_${state.day ? 'Day' : 'Month'}_Report_${label.replace(/\s/g,'_')}.xlsx`);
-});
+  saveWorkbook(wb, `Wellwell_${day ? 'Day' : 'Month'}_Report_${label.replace(/\s/g,'_')}.xlsx`);
+}
+$('#exportBtn').addEventListener('click', () => exportReport(null));
 
 // ================= Firebase backend (GitHub Pages hosting) =================
 // The page talks to Firebase through the same small interface it uses inside Claude:
@@ -960,8 +964,8 @@ const KO = {
   'Choose files': '파일 선택',
   'Month': '월', 'All months': '전체 기간',
   'Include non-Wellwell Coupang suppliers': '웰웰 외 쿠팡 공급업체 포함',
-  'Download month report': '월 보고서 다운로드',
-  'All uploaded data for the selected month (or day) in one Excel file': '선택한 월(또는 날짜)의 모든 데이터를 엑셀 파일 하나로',
+  'Download month report': '월 보고서 다운로드', 'Download this day': '이 날짜 다운로드',
+  'All uploaded data for the selected month in one Excel file': '선택한 월의 모든 데이터를 엑셀 파일 하나로',
   'Uploaded files': '업로드한 파일',
   'Sign out': '로그아웃', 'Starting…': '시작 중…', 'Checking sign-in…': '로그인 확인 중…', 'Not signed in': '로그인 안 됨', 'No access yet': '아직 권한 없음', 'Email not confirmed': '이메일 미인증',
   'Saved in this browser only – not shared': '이 브라우저에만 저장됨 – 공유 안 됨',
