@@ -1204,17 +1204,42 @@ function renderDashboard(){
   if (np) alerts.push(`<b>${np} lines have no price</b>, so the totals are lower than the real figure.${isViewer() ? '' : ' Add prices in the Missing prices tab.'}`);
   const dup = state.lines.filter(l => l.month === m && (l.excluded||'').startsWith('Duplicate')).length;
   if (dup) alerts.push(`${dup} duplicate line${dup>1?'s were':' was'} found and counted once.`);
-  const noteDay = state.day ? `<p class="note">A day is selected in the calendar; this overview always shows the whole month.</p>` : '';
+  // Product list for one day: the selected calendar day, or the latest day with data in this month.
+  const dsAll = [...new Set(L.map(l => l.date).filter(Boolean))].sort();
+  const pdDay = (state.day && state.day.slice(0,7) === m) ? state.day : (dsAll.filter(d => d <= TODAY).pop() || dsAll[dsAll.length-1] || null);
+  const pdIdx = dsAll.indexOf(pdDay);
+  const DL = pdDay ? L.filter(l => l.date === pdDay) : [];
+  const showVal = DL.some(l => l.price);
+  let pdRows = '';
+  for (const [gg,ko] of GROUPS){
+    const x = DL.filter(l => l.group === gg); if (!x.length) continue;
+    const prods = [...groupBy(x, l => l.product).entries()].map(([p, y]) => ({ p, q: sum(y,l=>l.qty), v: sum(y,l=>l.value), ch: [...new Set(y.map(l=>l.channel))] })).sort((a,b) => b.q - a.q);
+    pdRows += `<tr class="sub"><td colspan="2"><span class="chip ${gg}">${gg}</span> ${ko} · ${prods.length} products</td><td class="n">${n0(sum(x,l=>l.qty))}</td>${showVal?`<td class="n">${n0(sum(x,l=>l.value))}</td>`:''}</tr>`;
+    pdRows += prods.map(r => `<tr><td>${esc(r.p)}</td><td class="small muted">${esc(r.ch.slice(0,3).join(', '))}${r.ch.length>3?` +${r.ch.length-3}`:''}</td><td class="n">${n0(r.q)}</td>${showVal?`<td class="n">${n0(r.v)}</td>`:''}</tr>`).join('');
+  }
+  const pdNav = pdDay ? `<div class="bar"><h2>Products on ${esc(dayLabel(pdDay))}</h2><span class="pill">${state.day === pdDay ? 'selected day' : 'latest day with data'}</span><span class="spacer"></span>
+      <button type="button" id="pdPrev" ${pdIdx > 0 ? '' : 'disabled'} aria-label="Previous day with data">‹ Previous</button><button type="button" id="pdNext" ${pdIdx >= 0 && pdIdx < dsAll.length-1 ? '' : 'disabled'} aria-label="Next day with data">Next ›</button></div>
+      <p class="note">Click any day in the calendar above to see its products. Quantities are units; the same product from several channels is added together.</p>` : '';
+  const pdHtml = pdDay ? `<div>${pdNav}${table(`<th>Product</th><th>Channels</th><th class="n">Qty</th>${showVal?'<th class="n">Value</th>':''}`, pdRows, `<tr class="tot"><td colspan="2">Total · ${new Set(DL.map(l=>l.product)).size} products</td><td class="n">${n0(sum(DL,l=>l.qty))}</td>${showVal?`<td class="n">${n0(sum(DL,l=>l.value))}</td>`:''}</tr>`)}</div>`
+    : `<div><h2>Products by day</h2><p class="note">No order lines for ${monthLabel(m)} yet. Upload files and they appear here by day.</p></div>`;
+  const SHOW_TARGETS = false;   // comparison with last month and monthly targets – switch on later if wanted
   return `<div class="dash">
-    <div class="bar"><h2>${monthLabel(m)} overview</h2><span class="spacer"></span><span class="fresh">${loading ? 'Loading…' : 'Data: ' + fresh}</span></div>${noteDay}
-    <div><p class="note" style="margin-bottom:8px">${esc(span)} compared with ${esc(pspan)}</p><div class="cmp">${cmp}</div></div>
-    <div class="prog"><h2>Monthly targets</h2>${GROUPS.map(prow).join('')}${cur && Object.keys(t).length ? '<p class="note">The thin line marks where the month should be today if sales were spread evenly.</p>' : ''}${tform}</div>
+    <div class="bar"><h2>${monthLabel(m)} overview</h2><span class="spacer"></span><span class="fresh">${loading ? 'Loading…' : 'Data: ' + fresh}</span></div>
+    ${pdHtml}
+    ${SHOW_TARGETS ? `<div><p class="note" style="margin-bottom:8px">${esc(span)} compared with ${esc(pspan)}</p><div class="cmp">${cmp}</div></div>` : ''}
+    ${SHOW_TARGETS ? `<div class="prog"><h2>Monthly targets</h2>${GROUPS.map(prow).join('')}${cur && Object.keys(t).length ? '<p class="note">The thin line marks where the month should be today if sales were spread evenly.</p>' : ''}${tform}</div>` : ''}
     <div><h2>Daily value</h2><div class="legend" style="margin:6px 0">${GROUPS.map(([gg,ko,cls]) => `<span style="--c:var(--${cls})">${ko}</span>`).join('')}<span style="--c:var(--accent)">Month to date (right scale)</span></div><div class="scroll">${svg}</div></div>
     <div class="dgrid"><div><h2 style="margin-bottom:6px">Top 5 channels</h2>${topTable(top(l => l.channel), 'Channel')}</div><div><h2 style="margin-bottom:6px">Top 5 products</h2>${topTable(top(l => l.product), 'Product')}</div></div>
     <div><h2 style="margin-bottom:6px">Alerts</h2>${alerts.length ? `<ul class="alerts">${alerts.map(a => `<li>${a}</li>`).join('')}</ul>` : '<p class="note">Nothing to flag for this month.</p>'}</div>
   </div>`;
 }
 function wireDashboard(v){
+  const nav = dir => { const m = (!state.month || state.month === 'all') ? THIS_MONTH : state.month;
+    const ds = [...new Set(state.lines.filter(l => !l.excluded && l.month === m).map(l => l.date).filter(Boolean))].sort();
+    const curDay = (state.day && ds.includes(state.day)) ? state.day : (ds.filter(d => d <= TODAY).pop() || ds[ds.length-1]);
+    const j = ds.indexOf(curDay) + dir; if (j >= 0 && j < ds.length){ state.day = ds[j]; render(); } };
+  const pv = v.querySelector('#pdPrev'), nx = v.querySelector('#pdNext');
+  if (pv) pv.onclick = () => nav(-1); if (nx) nx.onclick = () => nav(1);
   const f = v.querySelector('#tform'); if (!f) return;
   f.onsubmit = e => { e.preventDefault(); const m = (!state.month || state.month === 'all') ? THIS_MONTH : state.month; const t = {};
     for (const [gg] of GROUPS){ const n = Number(v.querySelector('#t_' + gg).value); if (n > 0) t[gg] = n; }
