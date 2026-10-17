@@ -1,6 +1,7 @@
 rules_version = '2';
 // Wellwell Monthly Tally – who may read and write what.
 // A person gets access only when an admin adds their email to the "roles" collection.
+// Anyone signed in may file one access request (requests/{their email}); only admins read and approve them.
 // Roles: admin (prices, rules, team, settlements), uploader (order files), viewer (read only).
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -18,6 +19,15 @@ service cloud.firestore {
       allow read: if signedIn() && (email == myEmail() || isAdmin());
       allow write: if isAdmin()
         && (request.resource == null || request.resource.data.role in ['admin', 'uploader', 'viewer']);
+    }
+    match /requests/{email} {
+      allow read: if signedIn() && (email == myEmail() || isAdmin());
+      allow create, update: if signedIn() && email == myEmail()
+        && request.resource.data.keys().hasOnly(['email', 'name', 'at'])
+        && request.resource.data.email == myEmail()
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60
+        && request.resource.data.at is string && request.resource.data.at.size() <= 40;
+      allow delete: if isAdmin() || (signedIn() && email == myEmail());
     }
     match /config/{doc}        { allow read: if isMember(); allow write: if isAdmin(); }
     match /settlements/{doc}   { allow read: if isMember(); allow write: if isAdmin(); }

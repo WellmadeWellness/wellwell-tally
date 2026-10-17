@@ -24,7 +24,9 @@ You need one Google account for Firebase and the GitHub repository with this cod
 1. Open **Firestore Database → Data → Start collection**. Collection ID: `roles`.
 2. Document ID: **your email in lower case**, e.g. `factory@wellwell.co.kr`.
 3. Add a field `role` (string) = `admin`. Save.
-After this, add everyone else from the page's **Team** tab.
+After this, add everyone else from the page's **Team** tab, or let them sign in and click **Request access**: their request appears at the top of the Team tab with **Approve** and **Reject**.
+
+When `firestore.rules` changes in this repository, copy the whole file into **Firestore Database → Rules** and click **Publish**.
 
 ## 6. Publish on GitHub Pages
 1. In the GitHub repository: **Settings → Pages**.

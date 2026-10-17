@@ -899,7 +899,7 @@ function renderTabs(){
   const TABS = TABS0.filter(([id]) => !(isViewer() && ['missing','rules'].includes(id))).concat(state.backend === 'firebase' && state.role === 'admin' ? [['team','Team']] : []);
   if (!TABS.some(([id]) => id === state.tab)) state.tab = 'dashboard';
   const mc = missing().length, ic = issues().filter(i=>i[0]!=='muted').length, sc = Object.keys(settlementsAll()).length;
-  $('#tabs').innerHTML = TABS.map(([id,label]) => `<button role="tab" aria-selected="${state.tab===id}" data-tab="${id}">${label}${id==='missing'&&mc?`<span class="pill warn">${mc}</span>`:''}${id==='checks'&&ic?`<span class="pill bad">${ic}</span>`:''}${id==='compare'&&sc?`<span class="pill">${sc}</span>`:''}</button>`).join('');
+  $('#tabs').innerHTML = TABS.map(([id,label]) => `<button role="tab" aria-selected="${state.tab===id}" data-tab="${id}">${label}${id==='missing'&&mc?`<span class="pill warn">${mc}</span>`:''}${id==='checks'&&ic?`<span class="pill bad">${ic}</span>`:''}${id==='compare'&&sc?`<span class="pill">${sc}</span>`:''}${id==='team'&&reqCache&&reqCache.length?`<span class="pill warn">${reqCache.length}</span>`:''}</button>`).join('');
   $('#tabs').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; local.set('tab', state.tab); ensureMonths(); renderTabs(); renderView(); });
 }
 function emptyState(){
@@ -1160,17 +1160,41 @@ async function initFirebase(){
     let role = null;
     try{ const r = await fs.doc('roles/' + email).get(); role = r.exists ? r.data().role : null; }catch(e){ role = null; }
     if (!['admin','uploader','viewer'].includes(role)){
-      authPanel(`<div class="auth"><h2>Signed in as ${esc(email)}</h2><p>This account is not on the team list yet, so it cannot see the data. Ask an admin to add <b>${esc(email)}</b> in the Team tab, then reload this page.</p><div class="row"><button id="reloadBtn">Reload</button></div></div>`);
       setRole('viewer'); $('#role').lastElementChild.textContent = 'No access yet';
-      $('#reloadBtn').onclick = () => location.reload(); return;
+      showRequest(u, email); return;
     }
     authPanel(null);
     db = fbDb(fs); user = null;
     startShared(u.uid, email, role);
+    if (role === 'admin') setTimeout(watchRequests, 0);
     const txt = { admin: 'Admin', uploader: 'Uploader', viewer: 'Viewer' }[role];
     $('#role').lastElementChild.textContent = `${txt} · ${email}`;
     $('#drop').style.display = canWrite() ? '' : 'none';
   });
+}
+// A signed-in person who is not on the team list can ask for access. The request waits in the
+// "requests" collection until an admin approves or rejects it in the Team tab.
+function showRequest(u, email){
+  const fs = fb.fs; const ref = fs.doc('requests/' + email);
+  const draw = req => {
+    const when = req && req.at ? new Date(req.at).toLocaleString('ko-KR', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+    authPanel(`<div class="auth"><h2>Signed in as ${esc(email)}</h2>` + (req
+      ? `<p class="ok"><b>Access requested</b> ${esc(when)}</p><p>An admin will see your request in the Team tab. This page opens by itself once it is approved.</p><div class="err" id="rqErr" role="alert"></div><div class="row"><button id="reloadBtn">Reload</button><button class="ghost" id="rqCancel">Cancel request</button></div>`
+      : `<p>This account is not on the team list yet, so it cannot see the data. Send a request and an admin can approve it with one click.</p>
+        <label for="rqName">Your name <input type="text" id="rqName" maxlength="60" autocomplete="name" value="${esc(u.displayName || '')}"></label>
+        <div class="err" id="rqErr" role="alert"></div><div class="row"><button class="primary" id="rqSend">Request access</button><button class="ghost" id="reloadBtn">Reload</button></div>`) + `</div>`);
+    $('#reloadBtn').onclick = () => location.reload();
+    const err = m => { $('#rqErr').textContent = m; };
+    const send = $('#rqSend');
+    if (send) send.onclick = async () => { send.disabled = true;
+      try{ await ref.set({ email, name: ($('#rqName').value || '').trim().slice(0, 60), at: new Date().toISOString() }); }
+      catch(e){ send.disabled = false; err('Could not send the request: ' + (e.code || e.message)); } };
+    const cancel = $('#rqCancel');
+    if (cancel) cancel.onclick = () => ref.delete().catch(e => err('Could not cancel: ' + (e.code || e.message)));
+  };
+  ref.onSnapshot(s => draw(s.exists ? s.data() : null), () => draw(null));
+  // open the page as soon as an admin approves
+  fs.doc('roles/' + email).onSnapshot(s => { if (s.exists && ['admin','uploader','viewer'].includes(s.data().role)) location.reload(); }, () => {});
 }
 function showSignIn(mode){
   setRole('viewer'); $('#role').lastElementChild.textContent = 'Not signed in'; $('#signOut').hidden = true;
@@ -1205,17 +1229,28 @@ function showVerify(u){
   $('#vCont').onclick = async () => { await u.reload(); if (fb.auth.currentUser.emailVerified){ await fb.auth.currentUser.getIdToken(true); location.reload(); } else $('#vErr').textContent = 'Not confirmed yet.'; };
   $('#vSend').onclick = () => u.sendEmailVerification().then(() => $('#vErr').textContent = 'Sent.').catch(e => $('#vErr').textContent = e.message);
 }
-let teamCache = null;
+let teamCache = null, reqCache = null;
+function watchRequests(){
+  if (watchRequests.on || !fb || state.role !== 'admin') return; watchRequests.on = true;
+  fb.fs.collection('requests').onSnapshot(s => { reqCache = s.docs.map(d => Object.assign({ id: d.id }, d.data())).sort((a,b) => String(a.at||'').localeCompare(String(b.at||''))); renderTabs(); if (state.tab === 'team') renderView(); }, () => {});
+}
 function renderTeam(v){
   if (!fb){ v.innerHTML = ''; return; }
   const draw = () => {
     const rows = (teamCache || []).map(t => `<tr><td>${esc(t.id)}</td><td><select data-role="${esc(t.id)}" aria-label="Role for ${esc(t.id)}">${['admin','uploader','viewer'].map(r=>`<option ${r===t.role?'selected':''}>${r}</option>`).join('')}</select></td><td>${t.id===state.meEmail?'<span class="muted small">you</span>':`<button class="ghost" data-del="${esc(t.id)}">Remove</button>`}</td></tr>`).join('');
-    v.innerHTML = `<div class="section"><h2>Team</h2><p class="note">Admins change prices, rules and the team, and upload settlements. Uploaders add and remove their own order files. Viewers only look. A person signs in with this exact email (Google or email + password).</p>
+    const reqs = reqCache || [];
+    const reqHtml = reqs.length ? `<div class="section"><h2>Access requests <span class="pill warn">${reqs.length}</span></h2><p class="note">These people signed in and asked for access. Choose a role and approve, or reject.</p></div>` +
+      table('<th>Email</th><th>Name</th><th>Requested</th><th>Role</th><th></th>', reqs.map((r,i) => `<tr><td>${esc(r.id)}</td><td>${esc(r.name || '')}</td><td class="small muted">${r.at ? esc(new Date(r.at).toLocaleString('ko-KR', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })) : ''}</td><td><select id="rq${i}" aria-label="Role for ${esc(r.id)}"><option>viewer</option><option>uploader</option><option>admin</option></select></td><td><button class="primary" data-approve="${i}">Approve</button> <button class="ghost" data-reject="${i}">Reject</button></td></tr>`).join('')) : '';
+    v.innerHTML = reqHtml + `<div class="section"><h2>Team</h2><p class="note">Admins change prices, rules and the team, and upload settlements. Uploaders add and remove their own order files. Viewers only look. A person signs in with this exact email (Google or email + password).</p>
       <form class="bar" id="addForm"><label for="newEmail">Email <input type="email" id="newEmail" required placeholder="name@wellwell.co.kr"></label>
       <label for="newRole">Role <select id="newRole"><option>uploader</option><option>viewer</option><option>admin</option></select></label><button class="primary" type="submit">Add</button></form></div>` +
       (teamCache ? table('<th>Email</th><th>Role</th><th></th>', rows) : '<div class="empty">Loading…</div>');
     v.querySelector('#addForm').onsubmit = async e => { e.preventDefault(); const em = $('#newEmail').value.trim().toLowerCase(); if (!/^[^@\s/]+@[^@\s/]+\.[^@\s/]+$/.test(em)){ toast('Enter a valid email'); return; }
       try{ await fb.fs.doc('roles/' + em).set({ role: $('#newRole').value, addedBy: state.meEmail, addedAt: new Date().toISOString() }); toast(em + ' added'); }catch(err){ toast('Could not add: ' + err.code); } };
+    v.querySelectorAll('[data-approve]').forEach(b => b.onclick = async () => { const r = reqs[+b.dataset.approve]; const role = $('#rq' + b.dataset.approve).value; b.disabled = true;
+      try{ await fb.fs.doc('roles/' + r.id).set({ role, addedBy: state.meEmail, addedAt: new Date().toISOString() }); await fb.fs.doc('requests/' + r.id).delete(); toast(r.id + ' approved as ' + role); }catch(e){ b.disabled = false; toast('Could not approve: ' + e.code); } });
+    v.querySelectorAll('[data-reject]').forEach(b => b.onclick = () => { const r = reqs[+b.dataset.reject]; if (!b.dataset.confirm){ b.dataset.confirm = 1; b.textContent = 'Confirm reject'; return; }
+      fb.fs.doc('requests/' + r.id).delete().then(() => toast(r.id + ' rejected')).catch(e => toast('Could not reject: ' + e.code)); });
     v.querySelectorAll('[data-role]').forEach(sel => sel.onchange = () => fb.fs.doc('roles/' + sel.dataset.role).update({ role: sel.value }).then(() => toast('Role changed')).catch(e => toast('Could not change: ' + e.code)));
     v.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { if (b.dataset.confirm){ fb.fs.doc('roles/' + b.dataset.del).delete().then(() => toast('Removed')).catch(e => toast('Could not remove: ' + e.code)); } else { b.dataset.confirm = 1; b.textContent = 'Confirm remove'; } });
   };
@@ -1340,6 +1375,11 @@ const LANG = { cur: local.get('lang', (navigator.language || '').toLowerCase().s
 const isKo = () => LANG.cur === 'ko';
 const GKO = { Retail: '리테일', Parcel: '택배', Other: '기타' };
 const KO = {
+  'Access requested': '접근 요청함', 'Cancel request': '요청 취소', 'Your name': '이름', 'Request access': '접근 요청',
+  'An admin will see your request in the Team tab. This page opens by itself once it is approved.': '관리자가 팀 탭에서 요청을 확인합니다. 승인되면 이 페이지가 자동으로 열립니다.',
+  'This account is not on the team list yet, so it cannot see the data. Send a request and an admin can approve it with one click.': '이 계정은 아직 팀 목록에 없어 데이터를 볼 수 없습니다. 요청을 보내면 관리자가 한 번에 승인할 수 있습니다.',
+  'Access requests': '접근 요청', 'These people signed in and asked for access. Choose a role and approve, or reject.': '로그인 후 접근을 요청한 사람들입니다. 역할을 고른 뒤 승인하거나 거절하세요.',
+  'Name': '이름', 'Requested': '요청 시각', 'Approve': '승인', 'Reject': '거절', 'Confirm reject': '거절 확인',
   // header, upload, controls
   'Wellwell Monthly Tally': '웰웰 월 실적 집계',
   'Retail · 택배 · 기타 – upload order files, get the month': '리테일 · 택배 · 기타 – 주문 파일을 올리면 월 실적을 계산합니다',
@@ -1450,6 +1490,9 @@ const KO = {
 };
 // Texts with numbers or names inside: [pattern, Korean]. Names captured by ( ) are kept as they are.
 const KO_RE = [
+  [/^(.+) approved as (.+)$/, '$1 승인됨 ($2)'], [/^(.+) rejected$/, '$1 거절됨'],
+  [/^Could not send the request: (.+)$/, '요청을 보내지 못했습니다: $1'], [/^Could not cancel: (.+)$/, '취소하지 못했습니다: $1'],
+  [/^Could not approve: (.+)$/, '승인하지 못했습니다: $1'], [/^Could not reject: (.+)$/, '거절하지 못했습니다: $1'],
   [/^(\d[\d,]*) units · (\d[\d,]*) lines(?: ·)?$/, (m, a, b) => `${a}개 · ${b}줄${m.endsWith('·') ? ' ·' : ''}`],
   [/^(\d[\d,]*) unpriced$/, '가격 없음 $1'],
   [/^(\d+) with notes$/, '메모 $1'],
