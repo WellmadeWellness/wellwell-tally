@@ -708,7 +708,16 @@ function exportReport(day){
     const x = L.filter(l => l.group === g).sort((a,b) => (a.date||'').localeCompare(b.date||'') || a.channel.localeCompare(b.channel));
     const rows = [head].concat(x.map(row));
     rows.push([], vw ? ['Total','','','', sum(x,l=>l.qty), sum(x,l=>l.value)] : ['Total','','','', sum(x,l=>l.qty), '', sum(x,l=>l.value)]);
-    sheet(rows, `${ko} ${g}`, vw ? [11,18,10,44,8,14] : [11,18,10,44,8,10,14,30,24,18]);
+    // Product summary to the right of the lines (like a pivot: product → total quantity), sorted by product name.
+    const piv = [['Product (summary)', 'Qty']].concat([...groupBy(x, l => l.product).entries()]
+      .map(([p, y]) => [p, sum(y, l => l.qty)]).sort((a, b) => a[0].localeCompare(b[0], 'ko')));
+    piv.push(['Total', sum(x, l => l.qty)]);
+    const w = head.length;
+    for (let i = 0; i < Math.max(rows.length, piv.length); i++){
+      const r = (rows[i] || []).slice(); while (r.length < w) r.push(null);
+      rows[i] = r.concat([null], piv[i] || []);
+    }
+    sheet(rows, `${ko} ${g}`, (vw ? [11,18,10,44,8,14] : [11,18,10,44,8,10,14,30,24,18]).concat([3, 44, 10]));
   }
   // 3. By day, with running total
   let run = 0; const dayRows = [['Date','Weekday', ...GROUPS.map(([g,ko]) => `${g} ${ko}`), 'Day total', 'Running total']];
@@ -1059,7 +1068,7 @@ const KO = {
   'Download is not available in this view': '이 화면에서는 다운로드할 수 없습니다', 'Firebase is not set up yet – working in this browser only': 'Firebase 설정 전 – 이 브라우저에서만 작동합니다',
   'Price for': '가격', 'Type for': '유형',
   // month report (Excel)
-  'Subtotal': '소계', 'Weekday': '요일', 'Running total': '누계', 'Value (KRW incl. VAT)': '금액 (₩, 부가세 포함)', 'Check': '점검', 'Detail': '내용', 'Reference': '참조',
+  'Product (summary)': '제품 (요약)', 'Subtotal': '소계', 'Weekday': '요일', 'Running total': '누계', 'Value (KRW incl. VAT)': '금액 (₩, 부가세 포함)', 'Check': '점검', 'Detail': '내용', 'Reference': '참조',
   'Basis: factory price (제조원가) incl. VAT, from uploaded order files': '기준: 제조원가(부가세 포함), 업로드한 주문 파일 기준'
 };
 // Texts with numbers or names inside: [pattern, Korean]. Names captured by ( ) are kept as they are.
