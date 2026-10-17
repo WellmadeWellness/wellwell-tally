@@ -108,7 +108,7 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
     <div id="filesScope"></div>
     <div class="scroll"><table id="filesTable" style="min-width:620px"></table></div>
   </details>
-  <p class="note rules">Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.</p>
+  <p class="note rules">Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = every line in the daily 발주 files, including B2B, 벌크 and 오프라인 customers and samples, CS and staff purchases (marked by type). 기타 = 슈퍼키친, 웰스토리, N배송 and other separate 기타 files. Free gifts (사은품) are valued at the cost of the same product.</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -542,7 +542,7 @@ function renderView(){
     const foot = `<tr class="tot"><td>Total</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(L.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(L,l=>l.value))}</td><td class="n">${n0(sum(L,l=>l.qty))}</td></tr>`;
     let html = `<div class="section"><h2>Value by month (₩, incl. VAT)</h2></div>` + table(`<th>Month</th>${GROUPS.map(([g,ko])=>`<th class="n">${g} ${ko}</th>`).join('')}<th class="n">Total</th><th class="n">Units</th>`, rows, foot);
     const tg = groupBy(L.filter(l=>l.group!=='Retail'), l=>l.group+'|'+l.type);
-    if (tg.size) html += `<div class="section"><h2>택배 and 기타 by type</h2><p class="note">B2B lines found inside 택배 files are counted in 기타.</p></div>` + table('<th>Group</th><th>Type</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th>',
+    if (tg.size) html += `<div class="section"><h2>택배 and 기타 by type</h2><p class="note">B2B, 벌크 and 오프라인 lines inside 택배 files stay in 택배; the type shows what they are.</p></div>` + table('<th>Group</th><th>Type</th><th class="n">Lines</th><th class="n">Units</th><th class="n">Value</th>',
       [...tg.entries()].sort().map(([k,x])=>{ const [g,t]=k.split('|'); return `<tr><td><span class="chip ${g}">${g}</span></td><td>${esc(t)}</td><td class="n">${n0(x.length)}</td><td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td></tr>`; }).join(''));
     v.innerHTML = html; return;
   }
@@ -638,7 +638,7 @@ function renderRules(v){
   const ed = canAdmin();
   const chans = [...new Set(state.lines.filter(l=>l.cat==='Parcel').map(l=>l.channel))].sort();
   const opts = t => ['Online','Non-sale','B2B'].map(o=>`<option ${o===t?'selected':''}>${o}</option>`).join('');
-  let html = `<div class="section"><h2>택배 channels</h2><p class="note">Online and Non-sale stay in 택배; B2B moves the line to 기타. ${state.mode==='shared'?(ed?'Changes apply for the whole team.':'<span class="lock">Only an editor can change these.</span>'):'Changes are saved in this browser.'}</p></div>`;
+  let html = `<div class="section"><h2>택배 channels</h2><p class="note">Every line from a 택배 file stays in 택배; the type (Online, Non-sale, B2B) only labels it. ${state.mode==='shared'?(ed?'Changes apply for the whole team.':'<span class="lock">Only an editor can change these.</span>'):'Changes are saved in this browser.'}</p></div>`;
   html += chans.length ? table('<th>Channel</th><th>Type</th><th class="n">Lines</th>', chans.map(c=>{ const t = state.channelTypes[c] || Tally.defaultChannelType(c); return `<tr><td>${esc(c)}</td><td>${ed?`<select data-ch="${esc(c)}" aria-label="Type for ${esc(c)}">${opts(t)}</select>`:esc(t)}</td><td class="n">${n0(state.lines.filter(l=>l.channel===c).length)}</td></tr>`; }).join('')) : '<div class="empty">Load 택배 files to see their channels.</div>';
   html += `<div class="section"><h2>Order-number patterns</h2><p class="note">Used when a 택배 line does not name its channel. Learned from the July 위탁 sheet.</p></div>` +
     table('<th>Pattern</th><th>Channel</th>', Tally.ORDER_RULES.map(([re,c])=>`<tr><td style="font-family:var(--mono)">${esc(re.source)}</td><td>${esc(c)}</td></tr>`).join(''));
@@ -971,7 +971,7 @@ const KO = {
   'Saved in this browser only – not shared': '이 브라우저에만 저장됨 – 공유 안 됨',
   'Not saved – this browser blocks storage': '저장 안 됨 – 이 브라우저가 저장을 막고 있습니다',
   'Editor · saved for the team': '편집자 · 팀 전체에 저장', 'Contributor · saved for the team': '기여자 · 팀 전체에 저장', 'View only': '보기 전용',
-  'Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.': '분류 기준: 리테일 = B마트·쿠팡·마켓컬리 발주. 택배 = 온라인 채널의 매일 발주 내역(샘플·CS·직원구매는 비매출로 표시해 택배에 포함). 기타 = 슈퍼키친·웰스토리·N배송 파일과 택배 파일 안의 B2B·벌크·오프라인 거래. 사은품은 같은 제품의 원가로 계산합니다.',
+  'Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = every line in the daily 발주 files, including B2B, 벌크 and 오프라인 customers and samples, CS and staff purchases (marked by type). 기타 = 슈퍼키친, 웰스토리, N배송 and other separate 기타 files. Free gifts (사은품) are valued at the cost of the same product.': '분류 기준: 리테일 = B마트·쿠팡·마켓컬리 발주. 택배 = 매일 발주 파일의 모든 내역 (B2B·벌크·오프라인 거래와 샘플·CS·직원구매 포함, 유형으로 구분). 기타 = 슈퍼키친·웰스토리·N배송 등 별도 기타 파일. 사은품은 같은 제품의 원가로 계산합니다.',
   // tiles, groups
   'Retail': '리테일', 'Parcel': '택배', 'Other': '기타', 'Total': '합계',
   'Retail 리테일': '리테일', 'Parcel 택배': '택배', 'Other 기타': '기타', 'Total 합계': '합계',
@@ -991,7 +991,7 @@ const KO = {
   'No 택배 file': '택배 파일 없음', 'No 택배 files': '택배 파일 없음',
   // summary / tables
   'Value by month (₩, incl. VAT)': '월별 금액 (₩, 부가세 포함)', 'Units': '수량', 'Group': '구분', 'Type': '유형', 'Lines': '줄', 'Unpriced lines': '가격 없는 줄',
-  '택배 and 기타 by type': '택배·기타 유형별', 'B2B lines found inside 택배 files are counted in 기타.': '택배 파일 안의 B2B 내역은 기타로 계산합니다.',
+  '택배 and 기타 by type': '택배·기타 유형별', 'B2B, 벌크 and 오프라인 lines inside 택배 files stay in 택배; the type shows what they are.': '택배 파일 안의 B2B·벌크·오프라인 내역도 택배에 포함되며, 유형으로 구분됩니다.',
   'Online': '온라인', 'Non-sale': '비매출', 'B2B': 'B2B',
   'Date': '날짜', 'Day total': '일 합계', 'Month to date': '이번 달 누계', 'Channel / customer': '채널 / 거래처', 'Groups': '구분',
   'Unit price': '단가', 'Price source': '가격 출처', 'none': '없음', 'gift': '사은품',
@@ -1003,7 +1003,7 @@ const KO = {
   'Settlement': '정산', 'Order files (tally)': '주문 파일 (집계)', 'Difference': '차이', 'Tally vs settlement': '집계 대비 정산', 'Site': '사업장', 'Item': '항목', 'Note': '비고',
   'Not in order files': '주문 파일에 없음', 'Management adjustment': '경영팀 조정금액', 'Packaging fee – not in order files': '부자재 금액 – 주문 파일에 없음',
   '경한글로벌 (at factory price)': '경한글로벌 (제조원가 기준)', '경한글로벌 margin above factory price': '경한글로벌 제조원가 초과 마진',
-  '위탁 (online + non-sale)': '위탁 (온라인 + 비매출)', 'Sokcho': '속초', 'Uiwang': '의왕', 'Unidentified': '미확인',
+  '위탁 (online + non-sale)': '위탁 (온라인 + 비매출)', '위탁': '위탁', 'Sokcho': '속초', 'Uiwang': '의왕', 'Unidentified': '미확인',
   'Settlement (same basis)': '정산 (같은 기준)', 'Tally total': '집계 합계', 'Monthly value by group': '구분별 월 금액',
   'Months only partly uploaded will look low. A month marked … is still loading.': '일부만 업로드된 달은 낮게 보입니다. … 표시는 아직 불러오는 중입니다.',
   // missing / checks / rules
@@ -1014,8 +1014,8 @@ const KO = {
   'No problems found.': '문제가 없습니다.', 'Add prices in the Missing prices tab.': '가격 없음 탭에서 가격을 입력하세요.', 'An editor can add prices in the Missing prices tab.': '편집자가 가격 없음 탭에서 가격을 입력할 수 있습니다.',
   'See the Rules tab for the patterns.': '규칙 탭에서 형식을 볼 수 있습니다.', 'Notes from reading the files': '파일을 읽으며 남긴 메모',
   '택배 channels': '택배 채널', 'Load 택배 files to see their channels.': '택배 파일을 올리면 채널이 표시됩니다.',
-  'Online and Non-sale stay in 택배; B2B moves the line to 기타. Changes apply for the whole team.': '온라인·비매출은 택배에 남고, B2B는 기타로 옮겨집니다. 변경 사항은 팀 전체에 적용됩니다.',
-  'Online and Non-sale stay in 택배; B2B moves the line to 기타. Changes are saved in this browser.': '온라인·비매출은 택배에 남고, B2B는 기타로 옮겨집니다. 변경 사항은 이 브라우저에 저장됩니다.',
+  'Every line from a 택배 file stays in 택배; the type (Online, Non-sale, B2B) only labels it. Changes apply for the whole team.': '택배 파일의 모든 내역은 택배에 남고, 유형(온라인·비매출·B2B)은 구분용입니다. 변경 사항은 팀 전체에 적용됩니다.',
+  'Every line from a 택배 file stays in 택배; the type (Online, Non-sale, B2B) only labels it. Changes are saved in this browser.': '택배 파일의 모든 내역은 택배에 남고, 유형(온라인·비매출·B2B)은 구분용입니다. 변경 사항은 이 브라우저에 저장됩니다.',
   'Only an editor can change these.': '편집자만 바꿀 수 있습니다.',
   'Order-number patterns': '주문번호 형식', 'Used when a 택배 line does not name its channel. Learned from the July 위탁 sheet.': '택배 내역에 채널 이름이 없을 때 사용합니다. 7월 위탁 시트에서 가져왔습니다.', 'Pattern': '형식',
   'Price list': '가격표', 'Import prices (.xlsx)': '가격 가져오기 (.xlsx)', 'Download price list': '가격표 다운로드', 'Search': '검색', 'product name': '제품명', 'Price': '가격', 'Source': '출처', 'Undo edit': '수정 취소',
@@ -1131,6 +1131,7 @@ const KO_RE = [
   [/^Choose (.+) in the Month list to see this file's contents\.$/, '이 파일의 내용을 보려면 월 목록에서 $1을(를) 선택하세요.'],
   [/^(\d+) dup$/, '중복 $1'],
   [/^not counted$/, '집계 제외'],
+  [/^Includes B2B \/ 벌크 \/ 오프라인 ([\d,]+)$/, 'B2B·벌크·오프라인 $1 포함'],
   [/^Price for (.+)$/, '$1 가격'], [/^Type for (.+)$/, '$1 유형'], [/^Role for (.+)$/, '$1 역할'], [/^Ship date for (.+)$/, '$1 출고일'],
   [/^Set targets for (.+) \(₩ incl\. VAT\):$/, '$1 목표 설정 (₩, 부가세 포함):'],
   [/^(\d+)% of (.+) (on pace|behind pace)$/, (m, a, b, c) => `${b}의 ${a}% ${c === 'on pace' ? '목표 속도 유지' : '목표보다 느림'}`],

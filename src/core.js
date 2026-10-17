@@ -214,7 +214,7 @@
       x.price = p.price; x.priceSrc = p.src; x.gift = !!p.gift; x.priceKey = p.matched;
       x.value = p.price ? p.price * x.qty : 0;
       x.type = x.cat === 'Parcel' ? (channelTypes[x.channel] || defaultChannelType(x.channel)) : (x.cat === 'Retail' ? 'Retail' : 'B2B');
-      x.group = x.cat === 'Parcel' && x.type === 'B2B' ? 'Other' : x.cat;
+      x.group = x.cat;   // every line stays in the group of the file it came from (B2B lines in 택배 files stay in 택배)
       x.excluded = null; x.fileId = f.id;
       if (x.thirdParty && !opts.includeThirdParty) x.excluded = 'Third-party supplier (' + x.supplier + ')';
       const prev = seen.get(x.key);
@@ -274,7 +274,7 @@
       else if (/^위탁/.test(k)) {
         let b2b = 0;
         for (const [ch, a] of Object.entries(st.consignment)) { const t = channelTypes[ch] || defaultChannelType(ch); if (t === 'B2B') b2b += a; }
-        add('Parcel', '위탁 (online + non-sale)', v - b2b); if (b2b) add('Other', '위탁 B2B / 벌크 / 오프라인', b2b);
+        add('Parcel', '위탁', v, b2b ? 'Includes B2B / 벌크 / 오프라인 ' + Math.round(b2b).toLocaleString('ko-KR') : '');
       }
       else if (/N배송|수출|시장|직원/.test(k)) add('Other', k, v);
       else add('NotInOrders', k, v, /부자재/.test(k) ? 'Packaging fee – not in order files' : (/조정/.test(k) ? 'Management adjustment' : ''));
