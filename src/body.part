@@ -14,6 +14,12 @@ svg text{font-family:var(--sans);fill:var(--muted);font-size:11px}
 .day.today{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .day.future{opacity:.45}
 .day.gap{background:var(--warn-soft)}
+button.day{font:inherit;font-family:var(--mono);font-size:11px;cursor:pointer;width:100%}
+button.day:hover{border-color:var(--muted)}
+button.day.sel{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.day.sel small{color:var(--accent-ink)}
+button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
+.daybar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--accent-soft);border-radius:8px;padding:8px 12px;font-size:13px}
 .dots{display:flex;justify-content:center;gap:2px;height:6px;margin-top:3px}
 .dots i{width:6px;height:6px;border-radius:50%;background:var(--c)}
 .mstrip{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
@@ -316,10 +322,12 @@ $('#clearAll').addEventListener('click', async () => {
   for (const id of [...state.meta.keys()]) await removeFile(id);
 });
 $('#thirdParty').addEventListener('change', ev => { state.thirdParty = ev.target.checked; recompute(); });
-$('#month').addEventListener('change', ev => { state.month = ev.target.value; ensureMonths(); recompute(); });
+$('#month').addEventListener('change', ev => { state.month = ev.target.value; state.day = null; ensureMonths(); recompute(); });
 
 // ---------- rendering ----------
-const active = () => state.lines.filter(l => !l.excluded && (state.month === 'all' || l.month === state.month));
+const active = () => state.lines.filter(l => !l.excluded && (state.month === 'all' || l.month === state.month) && (!state.day || l.date === state.day));
+const dayLabel = d => new Date(d + 'T00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+function pickDay(d){ state.day = (state.day === d) ? null : d; render(); }
 function sum(arr, f){ return arr.reduce((a,x)=>a+(f(x)||0),0); }
 function groupBy(arr, kf){ const m = new Map(); for (const x of arr){ const k = kf(x); if(!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; }
 function render(){ renderFiles(); renderMonthStrip(); renderTiles(); renderTabs(); renderView(); $('#exportBtn').disabled = !state.lines.length; }
@@ -370,11 +378,17 @@ function renderMonthStrip(){
     const gap = !future && !hasParcel && wd !== 0 && wd !== 6 && L.some(l => l.group === 'Parcel') && iso <= (last('Parcel') || '');
     const dots = GROUPS.filter(([g]) => x.some(l => l.group === g)).map(([g,,cls]) => `<i style="--c:var(--${cls})"></i>`).join('');
     const tip = x.length ? `${iso}: ${won(sum(x,l=>l.value))}` : (gap ? `${iso}: no 택배 file` : iso);
-    cal += `<div class="day${iso===TODAY?' today':''}${future?' future':''}${gap?' gap':''}" title="${tip}">${d}<small>${'SMTWTFS'[wd]}</small><div class="dots">${dots}</div></div>`;
+    const sel = state.day === iso;
+    cal += `<button type="button" data-day="${iso}" aria-pressed="${sel}" class="day${iso===TODAY?' today':''}${future?' future':''}${gap?' gap':''}${sel?' sel':''}" title="${tip}${x.length?' – click to see this day':''}">${d}<small>${'SMTWTFS'[wd]}</small><div class="dots">${dots}</div></button>`;
   }
+  if (state.day && state.day.slice(0,7) !== m) state.day = null;
+  const dl = state.day ? L.filter(l => l.date === state.day) : [];
+  const dayBar = state.day ? `<div class="daybar" role="status"><b>Showing ${esc(dayLabel(state.day))} only</b><span>${GROUPS.map(([g,ko]) => `${ko} ${won(sum(dl.filter(l=>l.group===g),l=>l.value))}`).join(' · ')} · ${n0(sum(dl,l=>l.qty))} units</span><span class="spacer"></span><button type="button" id="wholeMonth">Show whole month</button></div>` : '';
   el.innerHTML = `<div class="mstrip"><div class="bar"><h2>${monthLabel(m)}</h2><span class="pill">${status}</span><span class="spacer"></span><span class="small muted">Latest: ${lastTxt}</span></div>
-    <div class="cal" aria-label="Days with uploaded orders">${cal}</div>
-    <div class="legend">${GROUPS.map(([g,ko,cls])=>`<span style="--c:var(--${cls})">${ko}</span>`).join('')}<span style="--c:var(--warn-soft)">Weekday with no 택배 file</span></div></div>`;
+    <div class="cal" aria-label="Days of ${monthLabel(m)} – click a day to see only that day">${cal}</div>${dayBar}
+    <div class="legend">${GROUPS.map(([g,ko,cls])=>`<span style="--c:var(--${cls})">${ko}</span>`).join('')}<span style="--c:var(--warn-soft)">Weekday with no 택배 file</span><span style="--c:var(--accent)">Selected day</span></div></div>`;
+  el.querySelectorAll('[data-day]').forEach(b => b.onclick = () => pickDay(b.dataset.day));
+  const wm = el.querySelector('#wholeMonth'); if (wm) wm.onclick = () => pickDay(state.day);
 }
 function renderTiles(){
   const L = active();
@@ -383,7 +397,7 @@ function renderTiles(){
     return `<div class="tile ${cls}"><div class="k">${g} <span>${ko}</span></div><div class="v" title="${won(sum(x,l=>l.value))}">${loading?'…':short(sum(x,l=>l.value))}</div>
     <div class="s">${n0(sum(x,l=>l.qty))} units · ${n0(x.length)} lines${np?` · <span style="color:var(--warn)">${np} unpriced</span>`:''}</div></div>`; }).join('');
   const tot = sum(L,l=>l.value);
-  $('#tiles').innerHTML = t + `<div class="tile total"><div class="k">Total <span>합계</span></div><div class="v" title="${won(tot)}">${loading?'…':short(tot)}</div><div class="s">${won(tot)}${state.month&&state.month!=='all'?' · '+esc(state.month):''}</div></div>`;
+  $('#tiles').innerHTML = t + `<div class="tile total"><div class="k">Total <span>합계</span></div><div class="v" title="${won(tot)}">${loading?'…':short(tot)}</div><div class="s">${won(tot)}${state.day ? ' · ' + esc(dayLabel(state.day)) : (state.month&&state.month!=='all'?' · '+esc(state.month):'')}</div></div>`;
 }
 function issues(){
   const L = state.lines; const out = [];
@@ -566,7 +580,7 @@ async function saveWorkbook(wb, fname){
 }
 $('#exportBtn').addEventListener('click', () => {
   const L = active(); const wb = XLSX.utils.book_new();
-  const label = state.month === 'all' ? 'All months' : state.month;
+  const label = state.day || (state.month === 'all' ? 'All months' : state.month);
   const sumRows = [['Wellwell Monthly Tally – ' + label],['Basis: factory price (제조원가) incl. VAT'],[],['Group','Lines','Units','Value (KRW incl. VAT)']];
   for (const [g,ko] of GROUPS){ const x = L.filter(l=>l.group===g); sumRows.push([g+' '+ko, x.length, sum(x,l=>l.qty), sum(x,l=>l.value)]); }
   sumRows.push(['Total', L.length, sum(L,l=>l.qty), sum(L,l=>l.value)]);
