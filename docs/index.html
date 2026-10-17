@@ -1083,7 +1083,8 @@ function exportReport(day){
   for (const [g,ko] of GROUPS){
     const x = L.filter(l => l.group === g).sort((a,b) => (a.date||'').localeCompare(b.date||'') || a.channel.localeCompare(b.channel));
     const rows = [head].concat(x.map(row));
-    rows.push([], vw ? ['Total','','','', sum(x,l=>l.qty), sum(x,l=>l.value)] : ['Total','','','', sum(x,l=>l.qty), '', sum(x,l=>l.value)]);
+    // No total row under the lines, so a pivot over whole columns (e.g. D:E) adds up correctly.
+    // The totals are in the product summary on the right and in 총 합계.
     // Product summary to the right of the lines (like a pivot: product → total quantity), sorted by product name.
     const piv = [['Product (summary)', 'Qty']].concat([...groupBy(x, l => l.product).entries()]
       .map(([p, y]) => [p, sum(y, l => l.qty)]).sort((a, b) => a[0].localeCompare(b[0], 'ko')));
