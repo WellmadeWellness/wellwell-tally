@@ -76,7 +76,7 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
     <label for="month">Month <select id="month"></select></label>
     <label><input type="checkbox" id="thirdParty"> Include non-Wellwell Coupang suppliers</label>
     <span class="spacer"></span>
-    <button id="exportBtn" class="primary" disabled>Download Excel</button>
+    <button id="exportBtn" class="primary" disabled title="All uploaded data for the selected month (or day) in one Excel file">Download month report</button>
   </div>
 
   <div class="panel" id="monthStrip" hidden></div>
@@ -605,29 +605,58 @@ async function saveWorkbook(wb, fname){
   catch(e){ if (e && e.code !== 'declined') toast('Download did not complete (' + (e.code||'error') + ')'); }
 }
 $('#exportBtn').addEventListener('click', () => {
-  const L = active(); const wb = XLSX.utils.book_new();
+  // Month-end report: everything uploaded for the selected month (or day), one workbook.
+  const L = active(); const wb = XLSX.utils.book_new(); const vw = isViewer();
   const label = state.day || (state.month === 'all' ? 'All months' : state.month);
-  const sumRows = [['Wellwell Monthly Tally – ' + label],['Basis: factory price (제조원가) incl. VAT'],[],['Group','Lines','Units','Value (KRW incl. VAT)']];
-  for (const [g,ko] of GROUPS){ const x = L.filter(l=>l.group===g); sumRows.push([g+' '+ko, x.length, sum(x,l=>l.qty), sum(x,l=>l.value)]); }
-  sumRows.push(['Total', L.length, sum(L,l=>l.qty), sum(L,l=>l.value)]);
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), 'Summary');
-  const ch = [['Group','Channel','Type','Lines','Units','Value']];
-  for (const [k,x] of groupBy(L, l=>l.group+'|'+l.channel)){ const [g,c]=k.split('|'); ch.push([g,c,x[0].type,x.length,sum(x,l=>l.qty),sum(x,l=>l.value)]); }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ch), 'By channel');
-  const vw = isViewer();
-  const ln = [vw ? ['Date','Month','Group','Type','Channel','Product','Qty','Value'] : ['Date','Month','Group','Type','Channel','Product','Qty','Unit price','Value','Price source','File','Sheet','Reference']];
-  for (const l of L) ln.push(vw ? [l.date,l.month,l.group,l.type,l.channel,l.product,l.qty,l.value] : [l.date,l.month,l.group,l.type,l.channel,l.product,l.qty,l.price||0,l.value,l.priceSrc||'NO PRICE',l.file,l.sheet||'',l.ref||'']);
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ln), 'Lines');
-  if (!vw) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Product','Units','Lines']].concat(missing().map(m=>[m.key,m.units,m.lines]))), 'Missing prices');
+  const title = state.day ? dayLabel(state.day) : (state.month === 'all' ? 'All months' : monthLabel(state.month));
+  const sheet = (rows, name, widths) => { const ws = XLSX.utils.aoa_to_sheet(rows); if (widths) ws['!cols'] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, name); };
+  // 1. Summary (총 합계 style): groups, then channels inside each group
+  const dates = L.map(l => l.date).filter(Boolean).sort();
+  const sumRows = [[`Wellwell – ${title}`], ['Basis: factory price (제조원가) incl. VAT, from uploaded order files'],
+    [`Data from ${dates[0] || '–'} to ${dates[dates.length-1] || '–'} · created ${new Date().toLocaleString('ko-KR')}`], [],
+    ['Group', 'Channel', 'Lines', 'Units', 'Value (KRW incl. VAT)']];
+  for (const [g,ko] of GROUPS){
+    const x = L.filter(l => l.group === g);
+    sumRows.push([`${g} ${ko}`, 'Subtotal', x.length, sum(x,l=>l.qty), sum(x,l=>l.value)]);
+    [...groupBy(x, l => l.channel).entries()].sort((a,b) => sum(b[1],l=>l.value) - sum(a[1],l=>l.value))
+      .forEach(([c, y]) => sumRows.push(['', c, y.length, sum(y,l=>l.qty), sum(y,l=>l.value)]));
+  }
+  sumRows.push([], ['Total 합계', '', L.length, sum(L,l=>l.qty), sum(L,l=>l.value)]);
+  const np = L.filter(l => !l.price).length;
+  if (np) sumRows.push([], [`Note: ${np} lines have no price and are counted as 0.`]);
+  sheet(sumRows, '총 합계', [16, 26, 10, 12, 20]);
+  // 2. One sheet per group with every line (like the 위탁 / 쿠팡 / 기타 sheets)
+  const head = vw ? ['Date','Channel','Type','Product','Qty','Value'] : ['Date','Channel','Type','Product','Qty','Unit price','Value','Price source','File','Reference'];
+  const row = l => vw ? [l.date,l.channel,l.type,l.product,l.qty,l.value] : [l.date,l.channel,l.type,l.product,l.qty,l.price||0,l.value,l.priceSrc||'NO PRICE',l.file,l.ref||''];
+  for (const [g,ko] of GROUPS){
+    const x = L.filter(l => l.group === g).sort((a,b) => (a.date||'').localeCompare(b.date||'') || a.channel.localeCompare(b.channel));
+    const rows = [head].concat(x.map(row));
+    rows.push([], vw ? ['Total','','','', sum(x,l=>l.qty), sum(x,l=>l.value)] : ['Total','','','', sum(x,l=>l.qty), '', sum(x,l=>l.value)]);
+    sheet(rows, `${ko} ${g}`, vw ? [11,18,10,44,8,14] : [11,18,10,44,8,10,14,30,24,18]);
+  }
+  // 3. By day, with running total
+  let run = 0; const dayRows = [['Date','Weekday', ...GROUPS.map(([g,ko]) => `${g} ${ko}`), 'Day total', 'Running total']];
+  for (const [d, x] of [...groupBy(L, l => l.date || 'unknown').entries()].sort()){
+    run += sum(x,l=>l.value);
+    dayRows.push([d, d !== 'unknown' ? new Date(d+'T00:00').toLocaleDateString('en-US',{weekday:'short'}) : '', ...GROUPS.map(([g]) => sum(x.filter(l=>l.group===g),l=>l.value)), sum(x,l=>l.value), run]);
+  }
+  sheet(dayRows, 'By day', [11,8,16,16,16,16,16]);
+  // 4. By product
+  const prodRows = [['Product','Groups','Units','Value']].concat([...groupBy(L, l => l.product).entries()]
+    .sort((a,b) => sum(b[1],l=>l.value) - sum(a[1],l=>l.value))
+    .map(([p, x]) => [p, [...new Set(x.map(l=>l.group))].join(', '), sum(x,l=>l.qty), sum(x,l=>l.value)]));
+  sheet(prodRows, 'By product', [44,18,10,16]);
+  // 5. Settlement comparison, missing prices and checks (not for viewers where prices show)
   const sts = Object.values(settlementsAll()).filter(s => state.month === 'all' || s.month === state.month);
   if (sts.length){
     const cr = [['Month','Site','Item','Group','Value','Note']];
     for (const s of sts) Tally.settlementGroups(s, state.channelTypes).detail.forEach(d => cr.push([s.month, s.site, d.label, d.group, d.value, d.note]));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cr), 'Settlement mapping');
+    sheet(cr, 'Settlement', [9,8,34,12,16,40]);
   }
+  if (!vw && missing().length) sheet([['Product','Units','Lines']].concat(missing().map(m=>[m.key,m.units,m.lines])), 'Missing prices', [44,10,8]);
   const ck = [['Check','Detail']]; for (const [,t,items] of issues()){ ck.push([t,'']); items.forEach(i=>ck.push(['',i])); }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ck), 'Checks');
-  saveWorkbook(wb, `Wellwell_Tally_${label.replace(/\s/g,'_')}.xlsx`);
+  if (!vw) sheet(ck, 'Checks', [50,80]);
+  saveWorkbook(wb, `Wellwell_${state.day ? 'Day' : 'Month'}_Report_${label.replace(/\s/g,'_')}.xlsx`);
 });
 
 // ================= Firebase backend (GitHub Pages hosting) =================
