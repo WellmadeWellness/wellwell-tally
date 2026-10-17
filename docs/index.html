@@ -137,6 +137,10 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
 .auth input[type=email],.auth input[type=password]{width:100%;padding:8px 10px}
 .auth .row{display:flex;gap:8px;flex-wrap:wrap}
 .auth .err{color:var(--bad);font-size:13px;min-height:1em}
+.langsw{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--surface)}
+.langsw button{border:none;border-radius:0;padding:4px 11px;font-size:12px;background:transparent;color:var(--muted)}
+.langsw button.on{background:var(--ink);color:var(--bg);font-weight:600}
+.ko .en-only{display:none}
 .lock{font-size:12px;color:var(--muted);background:var(--sunk);padding:6px 10px;border-radius:7px}
 </style>
 
@@ -144,6 +148,7 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
   <header>
     <h1>Wellwell Monthly Tally<small>Retail · 택배 · 기타 – upload order files, get the month</small></h1>
     <div class="hdr-right">
+      <div class="langsw no-tr" role="group" aria-label="Language / 언어"><button type="button" data-lang="ko">한국어</button><button type="button" data-lang="en">English</button></div>
       <span class="role local" id="role"><i></i><span>Starting…</span></span>
       <button class="ghost" id="signOut" hidden>Sign out</button>
       <span class="basis" title="All values use one basis: units × factory price (제조원가) including VAT. This is what Wellwell is paid on every channel.">Basis: factory price (제조원가) incl. VAT</span>
@@ -533,7 +538,8 @@ const chunkLines = c => c.json ? JSON.parse(c.json) : (c.lines || []);
 const monthOf = d => d ? d.slice(0,7) : 'unknown';
 const pad2 = n => String(n).padStart(2,'0');
 const NOW = new Date(); const TODAY = `${NOW.getFullYear()}-${pad2(NOW.getMonth()+1)}-${pad2(NOW.getDate())}`; const THIS_MONTH = TODAY.slice(0,7);
-const monthLabel = m => { if (!m || m === 'all') return 'All months'; const [y,mo] = m.split('-'); return new Date(+y, +mo-1, 1).toLocaleDateString('en-US',{ month:'long', year:'numeric' }); };
+const monthLabel = m => { if (!m || m === 'all') return (typeof isKo === 'function' && isKo()) ? '전체 기간' : 'All months'; const [y,mo] = m.split('-'); if (typeof isKo === 'function' && isKo()) return `${+y}년 ${+mo}월`; return new Date(+y, +mo-1, 1).toLocaleDateString('en-US',{ month:'long', year:'numeric' }); };
+const locale = () => (typeof isKo === 'function' && isKo()) ? 'ko-KR' : 'en-US';
 
 // ---------- start-up: shared mode when the page runs inside Claude with shared data ----------
 async function init(){
@@ -728,7 +734,7 @@ $('#month').addEventListener('change', ev => { state.month = ev.target.value; st
 
 // ---------- rendering ----------
 const active = () => state.lines.filter(l => !l.excluded && (state.month === 'all' || l.month === state.month) && (!state.day || l.date === state.day));
-const dayLabel = d => new Date(d + 'T00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const dayLabel = d => new Date(d + 'T00:00').toLocaleDateString(locale(), isKo() ? { month: 'long', day: 'numeric', weekday: 'short' } : { weekday: 'short', month: 'short', day: 'numeric' });
 function pickDay(d){ state.day = (state.day === d) ? null : d; render(); }
 function sum(arr, f){ return arr.reduce((a,x)=>a+(f(x)||0),0); }
 function groupBy(arr, kf){ const m = new Map(); for (const x of arr){ const k = kf(x); if(!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; }
@@ -794,7 +800,7 @@ function renderMonthStrip(){
     const dots = GROUPS.filter(([g]) => x.some(l => l.group === g)).map(([g,,cls]) => `<i style="--c:var(--${cls})"></i>`).join('');
     const tip = x.length ? `${iso}: ${won(sum(x,l=>l.value))}` : (gap ? `${iso}: no 택배 file` : iso);
     const sel = state.day === iso;
-    cal += `<button type="button" data-day="${iso}" aria-pressed="${sel}" class="day${iso===TODAY?' today':''}${future?' future':''}${gap?' gap':''}${sel?' sel':''}" title="${tip}${x.length?' – click to see this day':''}">${d}<small>${'SMTWTFS'[wd]}</small><div class="dots">${dots}</div></button>`;
+    cal += `<button type="button" data-day="${iso}" aria-pressed="${sel}" class="day${iso===TODAY?' today':''}${future?' future':''}${gap?' gap':''}${sel?' sel':''}" title="${tip}${x.length?' – click to see this day':''}">${d}<small>${(isKo() ? '일월화수목금토' : 'SMTWTFS')[wd]}</small><div class="dots">${dots}</div></button>`;
   }
   if (state.day && state.day.slice(0,7) !== m) state.day = null;
   const dl = state.day ? L.filter(l => l.date === state.day) : [];
@@ -809,10 +815,10 @@ function renderTiles(){
   const L = active();
   const loading = state.mode === 'shared' && state.month && state.month !== 'all' && !state.loadedMonths.has(state.month) && allMonths().length;
   const t = GROUPS.map(([g,ko,cls]) => { const x = L.filter(l=>l.group===g); const np = x.filter(l=>!l.price).length;
-    return `<div class="tile ${cls}"><div class="k">${g} <span>${ko}</span></div><div class="v" title="${won(sum(x,l=>l.value))}">${loading?'…':short(sum(x,l=>l.value))}</div>
+    return `<div class="tile ${cls}"><div class="k"><span class="en-only">${g} </span><span>${ko}</span></div><div class="v" title="${won(sum(x,l=>l.value))}">${loading?'…':short(sum(x,l=>l.value))}</div>
     <div class="s">${n0(sum(x,l=>l.qty))} units · ${n0(x.length)} lines${np?` · <span style="color:var(--warn)">${np} unpriced</span>`:''}</div></div>`; }).join('');
   const tot = sum(L,l=>l.value);
-  $('#tiles').innerHTML = t + `<div class="tile total"><div class="k">Total <span>합계</span></div><div class="v" title="${won(tot)}">${loading?'…':short(tot)}</div><div class="s">${won(tot)}${state.day ? ' · ' + esc(dayLabel(state.day)) : (state.month&&state.month!=='all'?' · '+esc(state.month):'')}</div></div>`;
+  $('#tiles').innerHTML = t + `<div class="tile total"><div class="k"><span class="en-only">Total </span><span>합계</span></div><div class="v" title="${won(tot)}">${loading?'…':short(tot)}</div><div class="s">${won(tot)}${state.day ? ' · ' + esc(dayLabel(state.day)) : (state.month&&state.month!=='all'?' · '+esc(state.month):'')}</div></div>`;
 }
 function issues(){
   const L = state.lines; const out = [];
@@ -868,7 +874,7 @@ function renderView(){
   if (state.tab === 'dates'){
     const ds = [...groupBy(L, l=>l.date||'unknown').entries()].sort(); let run = 0, runMonth = null;
     v.innerHTML = table(`<th>Date</th>${GROUPS.map(([g,ko])=>`<th class="n">${g} ${ko}</th>`).join('')}<th class="n">Units</th><th class="n">Day total</th><th class="n">Month to date</th>`,
-      ds.map(([d,x]) => { const wd = d!=='unknown' ? new Date(d+'T00:00').toLocaleDateString('en-US',{weekday:'short'}) : ''; if (monthOf(d) !== runMonth){ runMonth = monthOf(d); run = 0; } run += sum(x,l=>l.value); return `<tr><td>${d} <span class="muted">${wd}</span></td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(x.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${n0(run)}</td></tr>`; }).join(''),
+      ds.map(([d,x]) => { const wd = d!=='unknown' ? new Date(d+'T00:00').toLocaleDateString(locale(),{weekday:'short'}) : ''; if (monthOf(d) !== runMonth){ runMonth = monthOf(d); run = 0; } run += sum(x,l=>l.value); return `<tr><td>${d} <span class="muted">${wd}</span></td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(x.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(x,l=>l.qty))}</td><td class="n">${n0(sum(x,l=>l.value))}</td><td class="n">${n0(run)}</td></tr>`; }).join(''),
       `<tr class="tot"><td>Total</td>${GROUPS.map(([g])=>`<td class="n">${n0(sum(L.filter(l=>l.group===g),l=>l.value))}</td>`).join('')}<td class="n">${n0(sum(L,l=>l.qty))}</td><td class="n">${n0(sum(L,l=>l.value))}</td><td></td></tr>`);
     return;
   }
@@ -1001,7 +1007,8 @@ $('#exportBtn').addEventListener('click', () => {
   const L = active(); const wb = XLSX.utils.book_new(); const vw = isViewer();
   const label = state.day || (state.month === 'all' ? 'All months' : state.month);
   const title = state.day ? dayLabel(state.day) : (state.month === 'all' ? 'All months' : monthLabel(state.month));
-  const sheet = (rows, name, widths) => { const ws = XLSX.utils.aoa_to_sheet(rows); if (widths) ws['!cols'] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, name); };
+  const SHEET_KO = { 'By day': '일별', 'By product': '제품별', 'Settlement': '정산', 'Missing prices': '가격 없음', 'Checks': '점검', '리테일 Retail': '리테일', '택배 Parcel': '택배', '기타 Other': '기타' };
+  const sheet = (rows, name, widths) => { if (isKo()){ rows = rows.map(r => r.map(c => typeof c === 'string' ? trText(c) : c)); name = SHEET_KO[name] || name; } const ws = XLSX.utils.aoa_to_sheet(rows); if (widths) ws['!cols'] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, name); };
   // 1. Summary (총 합계 style): groups, then channels inside each group
   const dates = L.map(l => l.date).filter(Boolean).sort();
   const sumRows = [[`Wellwell – ${title}`], ['Basis: factory price (제조원가) incl. VAT, from uploaded order files'],
@@ -1030,7 +1037,7 @@ $('#exportBtn').addEventListener('click', () => {
   let run = 0; const dayRows = [['Date','Weekday', ...GROUPS.map(([g,ko]) => `${g} ${ko}`), 'Day total', 'Running total']];
   for (const [d, x] of [...groupBy(L, l => l.date || 'unknown').entries()].sort()){
     run += sum(x,l=>l.value);
-    dayRows.push([d, d !== 'unknown' ? new Date(d+'T00:00').toLocaleDateString('en-US',{weekday:'short'}) : '', ...GROUPS.map(([g]) => sum(x.filter(l=>l.group===g),l=>l.value)), sum(x,l=>l.value), run]);
+    dayRows.push([d, d !== 'unknown' ? new Date(d+'T00:00').toLocaleDateString(locale(),{weekday:'short'}) : '', ...GROUPS.map(([g]) => sum(x.filter(l=>l.group===g),l=>l.value)), sum(x,l=>l.value), run]);
   }
   sheet(dayRows, 'By day', [11,8,16,16,16,16,16]);
   // 4. By product
@@ -1262,6 +1269,237 @@ function wireDashboard(v){
     saveTargets(m, t); };
 }
 
+// ================= Language: 한국어 / English =================
+// The page is written in English. In Korean mode every text the page shows is translated after it is drawn.
+// Product names, channel names, customer names and file names are never translated (they are not in these lists).
+const LANG = { cur: local.get('lang', (navigator.language || '').toLowerCase().startsWith('ko') ? 'ko' : 'en') };
+const isKo = () => LANG.cur === 'ko';
+const GKO = { Retail: '리테일', Parcel: '택배', Other: '기타' };
+const KO = {
+  // header, upload, controls
+  'Wellwell Monthly Tally': '웰웰 월 실적 집계',
+  'Retail · 택배 · 기타 – upload order files, get the month': '리테일 · 택배 · 기타 – 주문 파일을 올리면 월 실적을 계산합니다',
+  'Basis: factory price (제조원가) incl. VAT': '기준: 제조원가 (부가세 포함)',
+  'All values use one basis: units × factory price (제조원가) including VAT. This is what Wellwell is paid on every channel.': '모든 금액은 하나의 기준을 씁니다: 수량 × 제조원가(부가세 포함). 모든 채널에서 웰웰이 받는 금액입니다.',
+  'Drop files here': '여기에 파일을 끌어다 놓으세요',
+  'or choose them: B마트, 쿠팡 and 컬리 orders (Retail), daily 발주 files (택배), 슈퍼키친, 웰스토리 and N배송 files (기타), and the month-end 정산 file for the Compare tab. Files are read in this browser – customer names, phones and addresses are never kept or shared.': '또는 선택하세요: B마트·쿠팡·컬리 발주(리테일), 매일 발주 파일(택배), 슈퍼키친·웰스토리·N배송 파일(기타), 정산 비교 탭용 월말 정산 파일. 파일은 이 브라우저에서 읽으며, 고객 이름·전화번호·주소는 저장하거나 공유하지 않습니다.',
+  'Choose files': '파일 선택',
+  'Month': '월', 'All months': '전체 기간',
+  'Include non-Wellwell Coupang suppliers': '웰웰 외 쿠팡 공급업체 포함',
+  'Download month report': '월 보고서 다운로드',
+  'All uploaded data for the selected month (or day) in one Excel file': '선택한 월(또는 날짜)의 모든 데이터를 엑셀 파일 하나로',
+  'Uploaded files': '업로드한 파일',
+  'Sign out': '로그아웃', 'Starting…': '시작 중…', 'Checking sign-in…': '로그인 확인 중…', 'Not signed in': '로그인 안 됨', 'No access yet': '아직 권한 없음', 'Email not confirmed': '이메일 미인증',
+  'Saved in this browser only – not shared': '이 브라우저에만 저장됨 – 공유 안 됨',
+  'Not saved – this browser blocks storage': '저장 안 됨 – 이 브라우저가 저장을 막고 있습니다',
+  'Editor · saved for the team': '편집자 · 팀 전체에 저장', 'Contributor · saved for the team': '기여자 · 팀 전체에 저장', 'View only': '보기 전용',
+  'Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.': '분류 기준: 리테일 = B마트·쿠팡·마켓컬리 발주. 택배 = 온라인 채널의 매일 발주 내역(샘플·CS·직원구매는 비매출로 표시해 택배에 포함). 기타 = 슈퍼키친·웰스토리·N배송 파일과 택배 파일 안의 B2B·벌크·오프라인 거래. 사은품은 같은 제품의 원가로 계산합니다.',
+  // tiles, groups
+  'Retail': '리테일', 'Parcel': '택배', 'Other': '기타', 'Total': '합계',
+  'Retail 리테일': '리테일', 'Parcel 택배': '택배', 'Other 기타': '기타', 'Total 합계': '합계',
+  // tabs
+  'Dashboard': '대시보드', 'Summary': '요약', 'By date': '날짜별', 'By channel': '채널별', 'Products': '제품', 'Compare 정산': '정산 비교', 'Trends': '추이', 'Missing prices': '가격 없음', 'Checks': '점검', 'Rules & prices': '규칙·가격', 'Team': '팀',
+  // calendar
+  'Closed month – kept for reference': '마감된 달 – 기록 보관', 'Upcoming month': '다가오는 달',
+  'Weekday with no 택배 file': '택배 파일 없는 평일', 'Selected day': '선택한 날', 'Show whole month': '한 달 전체 보기',
+  // dashboard
+  'Daily value': '일별 금액', 'Month to date (right scale)': '이번 달 누계 (오른쪽 눈금)', 'Daily value and month-to-date total': '일별 금액과 이번 달 누계',
+  'Top 5 channels': '상위 5개 채널', 'Top 5 products': '상위 5개 제품', 'Channel': '채널', 'Value': '금액', 'Share': '비중', 'No data yet': '아직 데이터 없음',
+  'Alerts': '알림', 'Nothing to flag for this month.': '이번 달은 알릴 내용이 없습니다.', 'Monthly targets': '월 목표', 'No target set': '목표 없음', 'Save targets': '목표 저장',
+  'latest day with data': '데이터가 있는 최근 날짜', 'selected day': '선택한 날', '‹ Previous': '‹ 이전', 'Next ›': '다음 ›',
+  'Previous day with data': '데이터가 있는 이전 날짜', 'Next day with data': '데이터가 있는 다음 날짜',
+  'Click any day in the calendar above to see its products. Quantities are units; the same product from several channels is added together.': '위 달력에서 날짜를 누르면 그 날의 제품이 표시됩니다. 수량은 개수이며, 여러 채널의 같은 제품은 합쳐서 보여줍니다.',
+  'Products by day': '날짜별 제품', 'Channels': '채널', 'Qty': '수량', 'Product': '제품',
+  'No 택배 file': '택배 파일 없음', 'No 택배 files': '택배 파일 없음',
+  // summary / tables
+  'Value by month (₩, incl. VAT)': '월별 금액 (₩, 부가세 포함)', 'Units': '수량', 'Group': '구분', 'Type': '유형', 'Lines': '줄', 'Unpriced lines': '가격 없는 줄',
+  '택배 and 기타 by type': '택배·기타 유형별', 'B2B lines found inside 택배 files are counted in 기타.': '택배 파일 안의 B2B 내역은 기타로 계산합니다.',
+  'Online': '온라인', 'Non-sale': '비매출', 'B2B': 'B2B',
+  'Date': '날짜', 'Day total': '일 합계', 'Month to date': '이번 달 누계', 'Channel / customer': '채널 / 거래처', 'Groups': '구분',
+  'Unit price': '단가', 'Price source': '가격 출처', 'none': '없음', 'gift': '사은품',
+  // compare / trends
+  'No settlement file yet.': '아직 정산 파일이 없습니다.',
+  'Upload the month-end 정산 file (the one with the 총 합계 and 위탁 sheets) to compare it with the tally from order files.': '월말 정산 파일(총 합계·위탁 시트가 있는 파일)을 올리면 주문 파일 집계와 비교합니다.',
+  'Only an editor can upload it.': '편집자만 올릴 수 있습니다.',
+  'The settlement is mapped onto Retail / 택배 / 기타 on the same factory-price basis as the tally. 경한글로벌 is compared at factory price; its margin above that, the packaging fee and the management adjustment are listed separately because order files do not contain them.': '정산 금액을 집계와 같은 제조원가 기준으로 리테일 / 택배 / 기타에 맞춰 나눕니다. 경한글로벌은 제조원가로 비교하며, 그 위의 마진·부자재 금액·경영팀 조정금액은 주문 파일에 없어서 따로 표시합니다.',
+  'Settlement': '정산', 'Order files (tally)': '주문 파일 (집계)', 'Difference': '차이', 'Tally vs settlement': '집계 대비 정산', 'Site': '사업장', 'Item': '항목', 'Note': '비고',
+  'Not in order files': '주문 파일에 없음', 'Management adjustment': '경영팀 조정금액', 'Packaging fee – not in order files': '부자재 금액 – 주문 파일에 없음',
+  '경한글로벌 (at factory price)': '경한글로벌 (제조원가 기준)', '경한글로벌 margin above factory price': '경한글로벌 제조원가 초과 마진',
+  '위탁 (online + non-sale)': '위탁 (온라인 + 비매출)', 'Sokcho': '속초', 'Uiwang': '의왕', 'Unidentified': '미확인',
+  'Settlement (same basis)': '정산 (같은 기준)', 'Tally total': '집계 합계', 'Monthly value by group': '구분별 월 금액',
+  'Months only partly uploaded will look low. A month marked … is still loading.': '일부만 업로드된 달은 낮게 보입니다. … 표시는 아직 불러오는 중입니다.',
+  // missing / checks / rules
+  'Every line has a price.': '모든 줄에 가격이 있습니다.', 'Product (as matched)': '제품 (매칭된 이름)', 'Price incl. VAT': '가격 (부가세 포함)', 'Save': '저장',
+  'Enter the factory price per unit, including VAT (the same basis as the July 위탁 단가). Saved prices apply for the whole team straight away. For a free gift, enter the cost of the product itself.': '개당 제조원가를 부가세 포함으로 입력하세요(7월 위탁 단가와 같은 기준). 저장한 가격은 팀 전체에 바로 적용됩니다. 사은품은 해당 제품의 원가를 입력하세요.',
+  'Enter the factory price per unit, including VAT (the same basis as the July 위탁 단가). Prices are saved in this browser. For a free gift, enter the cost of the product itself.': '개당 제조원가를 부가세 포함으로 입력하세요(7월 위탁 단가와 같은 기준). 가격은 이 브라우저에 저장됩니다. 사은품은 해당 제품의 원가를 입력하세요.',
+  'Only an editor can set prices. Send this list to the person who manages prices.': '가격은 편집자만 입력할 수 있습니다. 이 목록을 가격 담당자에게 보내세요.',
+  'No problems found.': '문제가 없습니다.', 'Add prices in the Missing prices tab.': '가격 없음 탭에서 가격을 입력하세요.', 'An editor can add prices in the Missing prices tab.': '편집자가 가격 없음 탭에서 가격을 입력할 수 있습니다.',
+  'See the Rules tab for the patterns.': '규칙 탭에서 형식을 볼 수 있습니다.', 'Notes from reading the files': '파일을 읽으며 남긴 메모',
+  '택배 channels': '택배 채널', 'Load 택배 files to see their channels.': '택배 파일을 올리면 채널이 표시됩니다.',
+  'Online and Non-sale stay in 택배; B2B moves the line to 기타. Changes apply for the whole team.': '온라인·비매출은 택배에 남고, B2B는 기타로 옮겨집니다. 변경 사항은 팀 전체에 적용됩니다.',
+  'Online and Non-sale stay in 택배; B2B moves the line to 기타. Changes are saved in this browser.': '온라인·비매출은 택배에 남고, B2B는 기타로 옮겨집니다. 변경 사항은 이 브라우저에 저장됩니다.',
+  'Only an editor can change these.': '편집자만 바꿀 수 있습니다.',
+  'Order-number patterns': '주문번호 형식', 'Used when a 택배 line does not name its channel. Learned from the July 위탁 sheet.': '택배 내역에 채널 이름이 없을 때 사용합니다. 7월 위탁 시트에서 가져왔습니다.', 'Pattern': '형식',
+  'Price list': '가격표', 'Import prices (.xlsx)': '가격 가져오기 (.xlsx)', 'Download price list': '가격표 다운로드', 'Search': '검색', 'product name': '제품명', 'Price': '가격', 'Source': '출처', 'Undo edit': '수정 취소',
+  'Import: an Excel sheet with columns "Product" and "Price" (incl. VAT). Matching products get the new price; new names are added.': '가져오기: "Product"와 "Price"(부가세 포함) 열이 있는 엑셀 시트. 같은 제품은 새 가격으로 바뀌고, 새 이름은 추가됩니다.',
+  'Set by an editor': '편집자가 입력', 'Entered here': '여기서 입력',
+  // files
+  'Team files': '팀 파일', 'Saved files': '저장된 파일', '– show details': '– 자세히 보기', 'Remove all files': '모든 파일 삭제', 'Click again to remove all': '한 번 더 누르면 모두 삭제',
+  'Saved permanently for the team. Every authorised person sees these files; removing a file removes it for everyone.': '팀 전체에 영구 저장됩니다. 권한이 있는 모든 사람이 이 파일을 보며, 삭제하면 모두에게서 삭제됩니다.',
+  'Saved in this browser on this computer. Other people and other browsers do not see them – use the page in Claude to share.': '이 컴퓨터의 이 브라우저에 저장됩니다. 다른 사람이나 다른 브라우저에서는 보이지 않습니다.',
+  'File': '파일', 'Read as': '인식 결과', 'Ship date': '출고일', 'Notes': '메모', 'Remove': '삭제', 'Confirm remove': '삭제 확인',
+  'No date in file name – check': '파일 이름에 날짜 없음 – 확인 필요', 'Files': '파일',
+  // empty states
+  'No files yet.': '아직 파일이 없습니다.', 'No files have been uploaded yet.': '아직 업로드된 파일이 없습니다.',
+  "Drop this week's order files above. The tiles fill in as each file is read: B마트, 쿠팡 and 컬리 orders go to Retail, daily 발주 files to 택배, and 슈퍼키친, 웰스토리 and N배송 files to 기타.": '이번 주 주문 파일을 위에 올려주세요. 파일을 읽는 대로 금액이 채워집니다: B마트·쿠팡·컬리 발주는 리테일, 매일 발주 파일은 택배, 슈퍼키친·웰스토리·N배송은 기타입니다.',
+  'Uploaded files are saved for everyone who has access to this page.': '업로드한 파일은 이 페이지에 접근 권한이 있는 모두에게 저장됩니다.',
+  "Totals appear here once a team member uploads this month's order files.": '팀원이 이번 달 주문 파일을 올리면 합계가 여기에 표시됩니다.',
+  // sign-in, team
+  'Sign in to Wellwell Monthly Tally': '웰웰 월 실적 집계 로그인', 'Create an account': '계정 만들기', 'Continue with Google': 'Google로 계속하기', 'or with email': '또는 이메일로',
+  'Email': '이메일', 'Password': '비밀번호', 'Sign in': '로그인', 'Create account': '계정 만들기', 'I already have an account': '이미 계정이 있습니다', 'Forgot password': '비밀번호 찾기',
+  'Only people on the team list can see the data.': '팀 목록에 있는 사람만 데이터를 볼 수 있습니다.',
+  'Only people on the team list can see the data. After creating the account, confirm your email, then ask an admin to add you.': '팀 목록에 있는 사람만 데이터를 볼 수 있습니다. 계정을 만든 후 이메일을 인증하고 관리자에게 추가를 요청하세요.',
+  'This account is not on the team list yet, so it cannot see the data. Ask an admin to add': '이 계정은 아직 팀 목록에 없어 데이터를 볼 수 없습니다. 관리자에게 다음 이메일 추가를 요청하세요:',
+  'in the Team tab, then reload this page.': '(팀 탭에서), 그런 다음 이 페이지를 새로고침하세요.', 'Reload': '새로고침',
+  'Confirm your email': '이메일 인증', 'Continue': '계속', 'Send the link again': '링크 다시 보내기', 'Not confirmed yet.': '아직 인증되지 않았습니다.', 'Sent.': '보냈습니다.',
+  'Wrong email or password.': '이메일 또는 비밀번호가 틀렸습니다.', 'No account with that email.': '그 이메일의 계정이 없습니다.', 'That email already has an account – sign in instead.': '이미 계정이 있는 이메일입니다 – 로그인하세요.',
+  'Use at least 6 characters.': '6자 이상 입력하세요.', 'That email address is not valid.': '올바른 이메일 주소가 아닙니다.', 'The Google window was closed.': 'Google 창이 닫혔습니다.', 'Type your email first.': '먼저 이메일을 입력하세요.',
+  'Admins change prices, rules and the team, and upload settlements. Uploaders add and remove their own order files. Viewers only look. A person signs in with this exact email (Google or email + password).': '관리자는 가격·규칙·팀을 관리하고 정산 파일을 올립니다. 업로더는 자신의 주문 파일을 추가·삭제합니다. 뷰어는 보기만 합니다. 이 이메일 그대로 로그인해야 합니다(Google 또는 이메일+비밀번호).',
+  'Add': '추가', 'Role': '역할', 'admin': '관리자', 'uploader': '업로더', 'viewer': '뷰어', 'you': '나', 'Loading…': '불러오는 중…',
+  // file kinds / notes
+  'B마트 order': 'B마트 발주', '쿠팡 order': '쿠팡 발주', '마켓컬리 order': '마켓컬리 발주',
+  'No order lines recognised in this file.': '이 파일에서 주문 내역을 찾지 못했습니다.',
+  // toasts
+  'Enter a price above 0': '0보다 큰 가격을 입력하세요', 'Enter a valid email': '올바른 이메일을 입력하세요', 'Excel downloaded': '엑셀을 다운로드했습니다', 'Excel saved': '엑셀을 저장했습니다',
+  'Price saved': '가격을 저장했습니다', 'Targets saved': '목표를 저장했습니다', 'Role changed': '역할을 바꿨습니다', 'Removed': '삭제했습니다',
+  'Only an admin can set targets': '관리자만 목표를 정할 수 있습니다', 'Only an editor can change channel types': '편집자만 채널 유형을 바꿀 수 있습니다', 'Only an editor can change prices': '편집자만 가격을 바꿀 수 있습니다',
+  'Only an editor can upload the month-end settlement file': '편집자만 월말 정산 파일을 올릴 수 있습니다', 'No rows with "Product" and "Price" found': '"Product"와 "Price" 열이 있는 줄을 찾지 못했습니다',
+  'The Excel reader did not load. Check the connection and reload.': '엑셀 읽기 기능을 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침하세요.',
+  'This browser would not save the files – they will be gone when the page closes': '이 브라우저가 파일 저장을 막았습니다 – 페이지를 닫으면 사라집니다',
+  'You can view this page but not upload. Ask the owner for Contributor access.': '보기만 가능하며 업로드할 수 없습니다. 관리자에게 권한을 요청하세요.',
+  'Your account does not have access to this data. Ask an admin.': '이 계정은 이 데이터에 접근할 수 없습니다. 관리자에게 문의하세요.',
+  'Download is not available in this view': '이 화면에서는 다운로드할 수 없습니다', 'Firebase is not set up yet – working in this browser only': 'Firebase 설정 전 – 이 브라우저에서만 작동합니다',
+  'Price for': '가격', 'Type for': '유형',
+  // month report (Excel)
+  'Subtotal': '소계', 'Weekday': '요일', 'Running total': '누계', 'Value (KRW incl. VAT)': '금액 (₩, 부가세 포함)', 'Check': '점검', 'Detail': '내용', 'Reference': '참조',
+  'Basis: factory price (제조원가) incl. VAT, from uploaded order files': '기준: 제조원가(부가세 포함), 업로드한 주문 파일 기준'
+};
+// Texts with numbers or names inside: [pattern, Korean]. Names captured by ( ) are kept as they are.
+const KO_RE = [
+  [/^(\d[\d,]*) units · (\d[\d,]*) lines(?: ·)?$/, (m, a, b) => `${a}개 · ${b}줄${m.endsWith('·') ? ' ·' : ''}`],
+  [/^(\d[\d,]*) unpriced$/, '가격 없음 $1'],
+  [/^(\d+) with notes$/, '메모 $1'],
+  [/^(\d+) other sheets? not used \(pivots, print or template sheets\)$/, '사용하지 않은 시트 $1개 (피벗·출력용·서식)'],
+  [/^(\d+) old sheets? skipped \(dated outside the last year, or an old outbound list\): (.*)$/, '오래된 시트 $1개 건너뜀 (1년 이전 날짜 또는 예전 출고 목록): $2'],
+  [/^(.*): (\d+) old sheets? skipped \(dated outside the last year, or an old outbound list\): (.*)$/, '$1: 오래된 시트 $2개 건너뜀 (1년 이전 날짜 또는 예전 출고 목록): $3'],
+  [/^(\d+) duplicate lines? left out$/, '중복 $1줄 제외'],
+  [/^(\d+) duplicate lines? (?:was|were) found and counted once\.$/, '중복 $1줄을 찾아 한 번만 계산했습니다.'],
+  [/^(\d+) free-gift lines valued at cost$/, '사은품 $1줄을 원가로 계산'],
+  [/^(\d+) 택배 lines with no channel$/, '채널을 알 수 없는 택배 $1줄'],
+  [/^([\d,]+) 택배 lines got their channel from the order-number format$/, '택배 $1줄은 주문번호 형식으로 채널을 판단했습니다'],
+  [/^(\d+) lines have no price, so they count as ₩0$/, '가격 없는 $1줄은 ₩0으로 계산됩니다'],
+  [/^(\d+) lines have no price$/, '가격 없는 줄 $1개'],
+  [/^, so the totals are lower than the real figure\.( Add prices in the Missing prices tab\.)?$/, (m, a) => ', 실제보다 합계가 낮게 나옵니다.' + (a ? ' 가격 없음 탭에서 가격을 입력하세요.' : '')],
+  [/^(\d+) Coupang lines from other suppliers left out$/, '다른 공급업체 쿠팡 $1줄 제외'],
+  [/^(.*) – tick "Include non-Wellwell Coupang suppliers" to count them$/, '$1 – "웰웰 외 쿠팡 공급업체 포함"을 체크하면 포함됩니다'],
+  [/^for (\d+) weekdays?: (.*)\. Totals for those days may be missing\.$/, '(평일 $1일): $2. 해당 날짜 합계가 빠졌을 수 있습니다.'],
+  [/^(\d+) products · factory price incl\. VAT$/, '제품 $1개 · 제조원가(부가세 포함)'],
+  [/^(\d+) files? added$/, '파일 $1개 추가됨'],
+  [/^(\d+) prices imported$/, '가격 $1개를 가져왔습니다'],
+  [/^Total · (\d+) products$/, '합계 · 제품 $1개'],
+  [/^(.+) · (\d+) products$/, '$1 · 제품 $2개'],
+  [/^Products on (.+)$/, '$1 제품'],
+  [/^Showing (.+) only$/, '$1만 보기'],
+  [/^(.+) overview$/, '$1 개요'],
+  [/^(.+) – this month$/, '$1 – 이번 달'],
+  [/^Month to date · day (\d+) of (\d+)$/, '이번 달 누계 · $2일 중 $1일째'],
+  [/^Month to date: (.+)$/, '이번 달 누계: $1'],
+  [/^Last (\d+) months?$/, '최근 $1개월'],
+  [/^All files \((\d+)\)$/, '전체 파일 ($1)'],
+  [/^(\d+) files? for (.+) · (\d+) in total$/, '$2 파일 $1개 · 전체 $3개'],
+  [/^(\d+) files? in total$/, '전체 파일 $1개'],
+  [/^Days of (.+) – click a day to see only that day$/, '$1 – 날짜를 누르면 그 날만 봅니다'],
+  [/^(\d{4}-\d\d-\d\d): (₩[\d,]+) – click to see this day$/, '$1: $2 – 누르면 이 날만 보기'],
+  [/^(\d{4}-\d\d-\d\d): no 택배 file$/, '$1: 택배 파일 없음'],
+  [/^(\d{4}-\d\d(?:-\d\d)?) (Retail|Parcel|Other): (.+)$/, (m, a, g, v) => `${a} ${GKO[g]}: ${v}`],
+  [/^(\d{4}-\d\d) settlement: (.+)$/, '$1 정산: $2'],
+  [/^(\d{4}-\d\d) · settlement (.+)$/, (m, a, b) => `${a} · 정산 ${b.replace('Sokcho', '속초').replace('Uiwang', '의왕')}`],
+  [/^Settlement ([\d,]+) – compared at factory price$/, '정산 $1 – 제조원가로 비교'],
+  [/^Settlement lines and items not in order files \((.+)\)$/, '정산 항목 및 주문 파일에 없는 항목 ($1)'],
+  [/^No files uploaded for (.+) yet\.$/, '$1에 업로드된 파일이 없습니다.'],
+  [/^No order files have been uploaded for (.+) yet, so the tally column is empty\.$/, '$1 주문 파일이 아직 없어 집계 열이 비어 있습니다.'],
+  [/^No order lines for (.+) yet\. Upload files and they appear here by day\.$/, '$1 주문 내역이 아직 없습니다. 파일을 올리면 날짜별로 여기에 표시됩니다.'],
+  [/^No settlement for (.+)\. Settlements loaded: (.+)\.$/, '$1 정산 파일이 없습니다. 업로드된 정산: $2.'],
+  [/^Month-end settlement for (\S+) \((Sokcho|Uiwang)\), total ([\d,]+)\. Not added to the tally – used in the Compare tab\.$/, (m, a, s, t) => `${a} 월말 정산 (${s === 'Sokcho' ? '속초' : '의왕'}), 합계 ${t}. 집계에는 더하지 않고 정산 비교 탭에서 사용합니다.`],
+  [/^(Admin|Uploader|Viewer) · (.+)$/, (m, r, e) => `${{ Admin: '관리자', Uploader: '업로더', Viewer: '뷰어' }[r]} · ${e}`],
+  [/^Signed in as (.+)$/, '로그인: $1'],
+  [/^(.*) · uploaded (.+)$/, '$1 · 업로드 $2'],
+  [/^uploaded (.+)$/, '업로드 $1'],
+  [/^(Data|Latest): (.*)$/, (m, k, rest) => `${k === 'Data' ? '데이터' : '최근'}: ${rest.replace(/ up to (\S+)/g, ' $1까지').replace(' · last upload ', ' · 마지막 업로드 ')}`],
+  [/^(.*) ₩([\d,]+) · (.*) ([\d,]+) units$/, '$1 ₩$2 · $3 $4개'],
+  [/^(.+) saved under (.+)$/, '$1 → $2에 저장됨'],
+  [/^(.+) was already uploaded – skipped$/, '$1 – 이미 업로드된 파일이라 건너뜀'],
+  [/^(.+) removed$/, '$1 삭제됨'],
+  [/^(.+) added$/, '$1 추가됨'],
+  [/^Reading (.+) \((\d+) of (\d+)\)$/, '$1 읽는 중 ($2/$3)'],
+  [/^Saving (.+) for the team \((\d+) of (\d+)\)$/, '$1 저장 중 ($2/$3)'],
+  [/^Removing (.+)$/, '$1 삭제 중'],
+  [/^Moving (.+) to (.+)$/, '$1 → $2로 이동 중'],
+  [/^(.*)\(Duplicate of a line in (.+)\)$/, '$1(중복: $2)'],
+  [/^Free gift at cost of (.+)$/, '사은품 – $1 원가 적용'],
+  [/^Same item as (.+)$/, '같은 제품: $1'],
+  [/^Assumed = (.+)$/, '같은 제품으로 가정: $1'],
+  [/^July (.+)$/, '7월 $1'],
+  [/^Price for (.+)$/, '$1 가격'], [/^Type for (.+)$/, '$1 유형'], [/^Role for (.+)$/, '$1 역할'], [/^Ship date for (.+)$/, '$1 출고일'],
+  [/^Set targets for (.+) \(₩ incl\. VAT\):$/, '$1 목표 설정 (₩, 부가세 포함):'],
+  [/^(\d+)% of (.+) (on pace|behind pace)$/, (m, a, b, c) => `${b}의 ${a}% ${c === 'on pace' ? '목표 속도 유지' : '목표보다 느림'}`],
+  [/^Could not (.+?): (.*)$/, '처리하지 못했습니다: $2'],
+  [/^Shared data problem: (.*)$/, '공유 데이터 문제: $1'],
+  [/^Download did not complete \((.*)\)$/, '다운로드가 완료되지 않았습니다 ($1)'],
+  [/^(.+): shared storage is full – remove old files first$/, '$1: 저장 공간이 가득 찼습니다 – 오래된 파일을 먼저 삭제하세요'],
+  [/^(.+): no order lines found$/, '$1: 주문 내역을 찾지 못했습니다'],
+  [/^A reset link was sent to (.+)\.$/, '$1(으)로 재설정 링크를 보냈습니다.'],
+  [/^Wellwell – (.+)$/, '웰웰 – $1'],
+  [/^Data from (\S+) to (\S+) · created (.+)$/, '데이터 기간 $1 ~ $2 · 작성 $3'],
+  [/^Note: (\d+) lines have no price and are counted as 0\.$/, '참고: 가격 없는 $1줄은 0으로 계산했습니다.'],
+];
+function trText(t){
+  if (!isKo() || !t) return t;
+  const lead = t.match(/^\s*/)[0], trail = t.match(/\s*$/)[0], core = t.trim();
+  if (!core || !/[A-Za-z]/.test(core)) return t;
+  if (KO[core] !== undefined) return lead + KO[core] + trail;
+  for (const [re, rep] of KO_RE) if (re.test(core)) return lead + core.replace(re, rep) + trail;
+  return t;
+}
+const ORIG = new WeakMap(), ORIG_ATTR = new WeakMap();
+const ATTRS = ['placeholder', 'title', 'aria-label'];
+function translateNode(root){
+  if (!isKo() || !root) return;
+  if (root.nodeType === 3){ const p = root.parentElement; if (p && (p.closest('script,style,.no-tr'))) return; const nv = trText(root.nodeValue); if (nv !== root.nodeValue){ if (!ORIG.has(root)) ORIG.set(root, root.nodeValue); root.nodeValue = nv; } return; }
+  if (root.nodeType !== 1 || root.closest('script,style,.no-tr')) return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const nodes = []; let n; while ((n = w.nextNode())) nodes.push(n);
+  nodes.forEach(translateNode);
+  const els = [root, ...root.querySelectorAll('[placeholder],[title],[aria-label]')];
+  for (const el of els) for (const a of ATTRS){ const v = el.getAttribute && el.getAttribute(a); if (!v) continue; const nv = trText(v); if (nv !== v){ const o = ORIG_ATTR.get(el) || {}; if (!(a in o)) o[a] = v; ORIG_ATTR.set(el, o); el.setAttribute(a, nv); } }
+}
+const trObserver = new MutationObserver(muts => { if (!isKo()) return; for (const m of muts){ if (m.type === 'characterData') translateNode(m.target); else if (m.type === 'attributes'){ const v = m.target.getAttribute(m.attributeName); const nv = trText(v); if (v && nv !== v){ const o = ORIG_ATTR.get(m.target) || {}; o[m.attributeName] = v; ORIG_ATTR.set(m.target, o); m.target.setAttribute(m.attributeName, nv); } } else m.addedNodes.forEach(translateNode); } });
+function restoreEnglish(){
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let n;
+  while ((n = w.nextNode())) if (ORIG.has(n)){ n.nodeValue = ORIG.get(n); ORIG.delete(n); }
+  document.querySelectorAll('[placeholder],[title],[aria-label]').forEach(el => { const o = ORIG_ATTR.get(el); if (o){ for (const [a, v] of Object.entries(o)) el.setAttribute(a, v); ORIG_ATTR.delete(el); } });
+}
+function setLang(l){
+  LANG.cur = l; local.set('lang', l);
+  document.documentElement.lang = l; document.body.classList.toggle('ko', l === 'ko');
+  document.querySelectorAll('[data-lang]').forEach(b => { const on = b.dataset.lang === l; b.setAttribute('aria-pressed', on); b.classList.toggle('on', on); });
+  if (l === 'en') restoreEnglish();
+  recompute();
+  if (l === 'ko') translateNode(document.body);
+}
+document.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => setLang(b.dataset.lang));
+trObserver.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS });
+
+setLang(LANG.cur);
 init();
 </script>
 
