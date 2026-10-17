@@ -59,6 +59,8 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
 .fdetail>td{background:var(--surface);padding:0}
 .fbox{display:flex;flex-direction:column;gap:10px;padding:12px 16px 16px 34px;border-left:3px solid var(--accent)}
 .fbox table{font-size:12px}
+.daylist{max-height:520px;overflow:auto;border-top:1px solid var(--line);padding-top:8px}
+.daylist .scroll{overflow:visible}
 .langsw{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--surface)}
 .langsw button{border:none;border-radius:0;padding:4px 11px;font-size:12px;background:transparent;color:var(--muted)}
 .langsw button.on{background:var(--ink);color:var(--bg);font-weight:600}
@@ -437,6 +439,22 @@ function renderFiles(){
   });
   $('#filesTable').querySelectorAll('[data-ship]').forEach(inp => { inp.onclick = e => e.stopPropagation(); inp.onchange = () => { if (inp.value) setShipDate(inp.dataset.ship, inp.value); }; });
 }
+
+// Products and quantities for one day (used under the calendar and on the Dashboard).
+function dayProductsTable(day){
+  const DL = state.lines.filter(l => !l.excluded && l.date === day);
+  if (!DL.length) return `<p class="note">No order lines on this day.</p>`;
+  const showVal = DL.some(l => l.price);
+  let rows = '';
+  for (const [gg,ko] of GROUPS){
+    const x = DL.filter(l => l.group === gg); if (!x.length) continue;
+    const prods = [...groupBy(x, l => l.product).entries()].map(([p, y]) => ({ p, q: sum(y,l=>l.qty), v: sum(y,l=>l.value), ch: [...new Set(y.map(l=>l.channel))] })).sort((a,b) => b.q - a.q);
+    rows += `<tr class="sub"><td colspan="2"><span class="chip ${gg}">${gg}</span> ${ko} · ${prods.length} products</td><td class="n">${n0(sum(x,l=>l.qty))}</td>${showVal?`<td class="n">${n0(sum(x,l=>l.value))}</td>`:''}</tr>`;
+    rows += prods.map(r => `<tr><td>${esc(r.p)}</td><td class="small muted">${esc(r.ch.slice(0,3).join(', '))}${r.ch.length>3?` +${r.ch.length-3}`:''}</td><td class="n">${n0(r.q)}</td>${showVal?`<td class="n">${n0(r.v)}</td>`:''}</tr>`).join('');
+  }
+  return table(`<th>Product</th><th>Channels</th><th class="n">Qty</th>${showVal?'<th class="n">Value</th>':''}`, rows,
+    `<tr class="tot"><td colspan="2">Total · ${new Set(DL.map(l=>l.product)).size} products</td><td class="n">${n0(sum(DL,l=>l.qty))}</td>${showVal?`<td class="n">${n0(sum(DL,l=>l.value))}</td>`:''}</tr>`);
+}
 function renderMonthStrip(){
   const el = $('#monthStrip'); const m = state.month;
   if (!m || m === 'all'){ el.hidden = true; return; }
@@ -460,7 +478,7 @@ function renderMonthStrip(){
   }
   if (state.day && state.day.slice(0,7) !== m) state.day = null;
   const dl = state.day ? L.filter(l => l.date === state.day) : [];
-  const dayBar = state.day ? `<div class="daybar" role="status"><b>Showing ${esc(dayLabel(state.day))} only</b><span>${GROUPS.map(([g,ko]) => `${ko} ${won(sum(dl.filter(l=>l.group===g),l=>l.value))}`).join(' · ')} · ${n0(sum(dl,l=>l.qty))} units</span><span class="spacer"></span><button type="button" id="wholeMonth">Show whole month</button></div>` : '';
+  const dayBar = state.day ? `<div class="daybar" role="status"><b>Showing ${esc(dayLabel(state.day))} only</b><span>${GROUPS.map(([g,ko]) => `${ko} ${won(sum(dl.filter(l=>l.group===g),l=>l.value))}`).join(' · ')} · ${n0(sum(dl,l=>l.qty))} units</span><span class="spacer"></span><button type="button" id="wholeMonth">Show whole month</button></div><div class="daylist"><h2 style="margin:4px 0 6px">Products on ${esc(dayLabel(state.day))}</h2>${dayProductsTable(state.day)}</div>` : '';
   el.innerHTML = `<div class="mstrip"><div class="bar"><h2>${monthLabel(m)}</h2><span class="pill">${status}</span><span class="spacer"></span><span class="small muted">Latest: ${lastTxt}</span></div>
     <div class="cal" aria-label="Days of ${monthLabel(m)} – click a day to see only that day">${cal}</div>${dayBar}
     <div class="legend">${GROUPS.map(([g,ko,cls])=>`<span style="--c:var(--${cls})">${ko}</span>`).join('')}<span style="--c:var(--warn-soft)">Weekday with no 택배 file</span><span style="--c:var(--accent)">Selected day</span></div></div>`;
@@ -899,7 +917,7 @@ function renderDashboard(){
   const pdNav = pdDay ? `<div class="bar"><h2>Products on ${esc(dayLabel(pdDay))}</h2><span class="pill">${state.day === pdDay ? 'selected day' : 'latest day with data'}</span><span class="spacer"></span>
       <button type="button" id="pdPrev" ${pdIdx > 0 ? '' : 'disabled'} aria-label="Previous day with data">‹ Previous</button><button type="button" id="pdNext" ${pdIdx >= 0 && pdIdx < dsAll.length-1 ? '' : 'disabled'} aria-label="Next day with data">Next ›</button></div>
       <p class="note">Click any day in the calendar above to see its products. Quantities are units; the same product from several channels is added together.</p>` : '';
-  const pdHtml = pdDay ? `<div>${pdNav}${table(`<th>Product</th><th>Channels</th><th class="n">Qty</th>${showVal?'<th class="n">Value</th>':''}`, pdRows, `<tr class="tot"><td colspan="2">Total · ${new Set(DL.map(l=>l.product)).size} products</td><td class="n">${n0(sum(DL,l=>l.qty))}</td>${showVal?`<td class="n">${n0(sum(DL,l=>l.value))}</td>`:''}</tr>`)}</div>`
+  const pdHtml = (state.day && state.day === pdDay) ? `<div><div class="bar"><h2>Products on ${esc(dayLabel(pdDay))}</h2><span class="spacer"></span><button type="button" id="pdPrev" ${pdIdx > 0 ? '' : 'disabled'}>‹ Previous</button><button type="button" id="pdNext" ${pdIdx >= 0 && pdIdx < dsAll.length-1 ? '' : 'disabled'}>Next ›</button></div><p class="note">The product list for this day is shown under the calendar above.</p></div>` : pdDay ? `<div>${pdNav}${table(`<th>Product</th><th>Channels</th><th class="n">Qty</th>${showVal?'<th class="n">Value</th>':''}`, pdRows, `<tr class="tot"><td colspan="2">Total · ${new Set(DL.map(l=>l.product)).size} products</td><td class="n">${n0(sum(DL,l=>l.qty))}</td>${showVal?`<td class="n">${n0(sum(DL,l=>l.value))}</td>`:''}</tr>`)}</div>`
     : `<div><h2>Products by day</h2><p class="note">No order lines for ${monthLabel(m)} yet. Upload files and they appear here by day.</p></div>`;
   const SHOW_TARGETS = false;   // comparison with last month and monthly targets – switch on later if wanted
   return `<div class="dash">
@@ -965,7 +983,7 @@ const KO = {
   'latest day with data': '데이터가 있는 최근 날짜', 'selected day': '선택한 날', '‹ Previous': '‹ 이전', 'Next ›': '다음 ›',
   'Previous day with data': '데이터가 있는 이전 날짜', 'Next day with data': '데이터가 있는 다음 날짜',
   'Click any day in the calendar above to see its products. Quantities are units; the same product from several channels is added together.': '위 달력에서 날짜를 누르면 그 날의 제품이 표시됩니다. 수량은 개수이며, 여러 채널의 같은 제품은 합쳐서 보여줍니다.',
-  'Products by day': '날짜별 제품', 'Channels': '채널', 'Qty': '수량', 'Product': '제품',
+  'Products by day': '날짜별 제품', 'No order lines on this day.': '이 날짜에는 주문 내역이 없습니다.', 'The product list for this day is shown under the calendar above.': '이 날짜의 제품 목록은 위 달력 아래에 표시됩니다.', 'Channels': '채널', 'Qty': '수량', 'Product': '제품',
   'No 택배 file': '택배 파일 없음', 'No 택배 files': '택배 파일 없음',
   // summary / tables
   'Value by month (₩, incl. VAT)': '월별 금액 (₩, 부가세 포함)', 'Units': '수량', 'Group': '구분', 'Type': '유형', 'Lines': '줄', 'Unpriced lines': '가격 없는 줄',
