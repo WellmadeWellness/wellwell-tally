@@ -215,7 +215,7 @@
       x.value = p.price ? p.price * x.qty : 0;
       x.type = x.cat === 'Parcel' ? (channelTypes[x.channel] || defaultChannelType(x.channel)) : (x.cat === 'Retail' ? 'Retail' : 'B2B');
       x.group = x.cat === 'Parcel' && x.type === 'B2B' ? 'Other' : x.cat;
-      x.excluded = null;
+      x.excluded = null; x.fileId = f.id;
       if (x.thirdParty && !opts.includeThirdParty) x.excluded = 'Third-party supplier (' + x.supplier + ')';
       const prev = seen.get(x.key);
       if (prev && prev !== f.fileName) x.excluded = 'Duplicate of a line in ' + prev;

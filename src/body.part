@@ -51,6 +51,14 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
 .auth input[type=email],.auth input[type=password]{width:100%;padding:8px 10px}
 .auth .row{display:flex;gap:8px;flex-wrap:wrap}
 .auth .err{color:var(--bad);font-size:13px;min-height:1em}
+.frow{cursor:pointer}
+.frow:hover td{background:var(--sunk)}
+.frow.open td{background:var(--accent-soft)}
+.frow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.caret{display:inline-block;width:1em;color:var(--muted)}
+.fdetail>td{background:var(--surface);padding:0}
+.fbox{display:flex;flex-direction:column;gap:10px;padding:12px 16px 16px 34px;border-left:3px solid var(--accent)}
+.fbox table{font-size:12px}
 .langsw{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--surface)}
 .langsw button{border:none;border-radius:0;padding:4px 11px;font-size:12px;background:transparent;color:var(--muted)}
 .langsw button.on{background:var(--ink);color:var(--bg);font-weight:600}
@@ -96,7 +104,7 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
     <summary class="section" style="cursor:pointer"><span class="bar" style="display:inline-flex"><h2 id="filesTitle">Files</h2></span></summary>
     <div class="bar" style="padding:0 16px 8px"><span class="muted small" id="filesHint"></span><span class="spacer"></span><button class="ghost" id="clearAll">Remove all files</button></div>
     <div id="filesScope"></div>
-    <div class="scroll"><table id="filesTable" style="min-width:900px"></table></div>
+    <div class="scroll"><table id="filesTable" style="min-width:620px"></table></div>
   </details>
   <p class="note rules">Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.</p>
 </div>
@@ -383,27 +391,51 @@ function renderFiles(){
   $('#clearAll').hidden = !canAdmin();
   const body = rows.map(f => {
     const kind = (f.kinds||[])[0] || 'Unknown';
-    const sheets = (f.sheets||[]).map(s => esc((s.kind||'').split(' · ')[1] || s.kind) + (s.date ? ' <span class="muted">' + s.date + '</span>' : '')).join('<br>');
+    const open = state.openFile === f.id;
+    const sheets = (f.sheets||[]).map(s => esc((s.kind||'').split(' · ')[1] || s.kind) + (s.date ? ' <span class="muted">' + s.date + '</span>' : '')).join(', ');
     const canEditRow = canAdmin() || (canWrite() && f.mine);
     const shipVal = f.shipOverride || ((f.sheets||[])[0]||{}).date || '';
-    const ship = kind === 'Parcel' ? (canEditRow ? `<input type="date" value="${esc(shipVal)}" data-ship="${esc(f.id)}" aria-label="Ship date for ${esc(f.fileName)}">` : esc(shipVal)) + ((f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride) ? '<div class="small" style="color:var(--warn)">No date in file name – check</div>' : '') : '';
+    const noDate = kind === 'Parcel' && f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride;
     const when = f.at ? new Date(f.at).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
     const by = state.mode === 'shared' ? (f.byEmail || (f.by ? (state.names[f.by] || 'a team member') : '')) : '';
     const who = (by || when) ? `<div class="small muted">${esc(by)}${by && when ? ' · ' : ''}${when ? 'uploaded ' + esc(when) : ''}</div>` : '';
-    const rm = canEditRow ? `<button class="ghost" data-rm="${esc(f.id)}">${state.pendingRemove===f.id?'Confirm remove':'Remove'}</button>` : '';
-    return `<tr><td>${esc(f.fileName)}${who}</td><td><span class="chip ${esc(kind)}">${esc(kind)}</span></td><td>${sheets || '<span class="muted">–</span>'}</td><td>${ship}</td>
-      <td class="n">${n0(f.lines)}</td><td class="n">${n0(f.units)}</td><td class="small muted" style="max-width:320px">${(f.notes||[]).map(esc).join('<br>')}${f.minor?`<div>${esc(f.minor)}</div>`:''}</td><td>${rm}</td></tr>`;
+    const warn = noDate || (f.notes||[]).length ? ' <span class="pill warn">!</span>' : '';
+    let row = `<tr class="frow${open ? ' open' : ''}" data-open="${esc(f.id)}" tabindex="0" role="button" aria-expanded="${open}"><td><span class="caret">${open ? '▾' : '▸'}</span> <b>${esc(f.fileName)}</b>${warn}${who}</td><td><span class="chip ${esc(kind)}">${esc(kind)}</span></td><td>${esc(shipVal || '–')}</td><td class="n">${n0(f.lines)}</td><td class="n">${n0(f.units)}</td></tr>`;
+    if (open){
+      // the file's contents: products and quantities (from the loaded month data)
+      const FL = state.lines.filter(l => l.fileId === f.id);
+      const ms = (f.months || []).filter(x => x !== state.month);
+      let contents;
+      if (FL.length){
+        const prods = [...groupBy(FL, l => l.product).entries()].map(([p, y]) => ({ p, q: sum(y,l=>l.qty), v: sum(y,l=>l.value), ch: [...new Set(y.map(l=>l.channel))], dup: y.filter(l => (l.excluded||'').startsWith('Duplicate')).length, skip: y.filter(l => l.excluded && !l.excluded.startsWith('Duplicate')).length })).sort((a,b) => b.q - a.q);
+        const showV = !isViewer() && FL.some(l => l.price);
+        contents = table(`<th>Product</th><th>Channels</th><th class="n">Qty</th>${showV?'<th class="n">Value</th>':''}`,
+          prods.map(r => `<tr><td>${esc(r.p)}${r.dup ? ` <span class="chip warn">${r.dup} dup</span>` : ''}${r.skip ? ` <span class="chip">not counted</span>` : ''}</td><td class="small muted">${esc(r.ch.slice(0,3).join(', '))}${r.ch.length>3?` +${r.ch.length-3}`:''}</td><td class="n">${n0(r.q)}</td>${showV?`<td class="n">${n0(r.v)}</td>`:''}</tr>`).join(''),
+          `<tr class="tot"><td colspan="2">Total · ${prods.length} products</td><td class="n">${n0(sum(FL,l=>l.qty))}</td>${showV?`<td class="n">${n0(sum(FL,l=>l.value))}</td>`:''}</tr>`);
+      } else contents = `<p class="note">${ms.length ? `Choose ${esc(ms.map(monthLabel).join(', '))} in the Month list to see this file's contents.` : 'Loading…'}</p>`;
+      const ship = kind === 'Parcel' ? `<label class="small">Ship date ${canEditRow ? `<input type="date" value="${esc(shipVal)}" data-ship="${esc(f.id)}" aria-label="Ship date for ${esc(f.fileName)}">` : esc(shipVal)}</label>${noDate ? ' <span class="small" style="color:var(--warn)">No date in file name – check</span>' : ''}` : '';
+      const rm = canEditRow ? `<button class="ghost" data-rm="${esc(f.id)}">${state.pendingRemove===f.id?'Confirm remove':'Remove'}</button>` : '';
+      row += `<tr class="fdetail"><td colspan="5"><div class="fbox">
+        <div class="bar"><span class="small"><span class="muted">Read as:</span> ${sheets || '–'}</span>${ship}<span class="spacer"></span>${rm}</div>
+        ${(f.notes||[]).length || f.minor ? `<p class="note">${(f.notes||[]).map(esc).join('<br>')}${f.minor ? `${(f.notes||[]).length ? '<br>' : ''}${esc(f.minor)}` : ''}</p>` : ''}
+        ${contents}</div></td></tr>`;
+    }
+    return row;
   }).join('');
   $('#filesScope').innerHTML = scopeBar;
   $('#filesScope').querySelectorAll('[data-scope]').forEach(b => b.onclick = () => { state.filesScope = b.dataset.scope; renderFiles(); });
   if (!rows.length){ $('#filesTable').innerHTML = `<tbody><tr><td class="empty">No files uploaded for ${esc(monthLabel(m))} yet.</td></tr></tbody>`; return; }
-  $('#filesTable').innerHTML = `<thead><tr><th>File</th><th>Type</th><th>Read as</th><th>Ship date</th><th class="n">Lines</th><th class="n">Units</th><th>Notes</th><th></th></tr></thead><tbody>${body}</tbody>`;
-  $('#filesTable').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
-    const id = b.dataset.rm;
-    if (state.pendingRemove !== id){ state.pendingRemove = id; renderFiles(); setTimeout(()=>{ if (state.pendingRemove===id){ state.pendingRemove=null; renderFiles(); } }, 4000); return; }
-    state.pendingRemove = null; removeFile(id);
+  $('#filesTable').innerHTML = `<thead><tr><th>File <span class="muted small" style="font-weight:400">– click a file to see what is inside</span></th><th>Type</th><th>Date</th><th class="n">Lines</th><th class="n">Units</th></tr></thead><tbody>${body}</tbody>`;
+  $('#filesTable').querySelectorAll('[data-open]').forEach(tr => {
+    const toggle = () => { state.openFile = state.openFile === tr.dataset.open ? null : tr.dataset.open; renderFiles(); };
+    tr.onclick = toggle; tr.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); } };
   });
-  $('#filesTable').querySelectorAll('[data-ship]').forEach(inp => inp.onchange = () => { if (inp.value) setShipDate(inp.dataset.ship, inp.value); });
+  $('#filesTable').querySelectorAll('[data-rm]').forEach(b => b.onclick = e => {
+    e.stopPropagation(); const id = b.dataset.rm;
+    if (state.pendingRemove !== id){ state.pendingRemove = id; renderFiles(); setTimeout(()=>{ if (state.pendingRemove===id){ state.pendingRemove=null; renderFiles(); } }, 4000); return; }
+    state.pendingRemove = null; state.openFile = null; removeFile(id);
+  });
+  $('#filesTable').querySelectorAll('[data-ship]').forEach(inp => { inp.onclick = e => e.stopPropagation(); inp.onchange = () => { if (inp.value) setShipDate(inp.dataset.ship, inp.value); }; });
 }
 function renderMonthStrip(){
   const el = $('#monthStrip'); const m = state.month;
@@ -971,7 +1003,7 @@ const KO = {
   'Team files': '팀 파일', 'Saved files': '저장된 파일', '– show details': '– 자세히 보기', 'Remove all files': '모든 파일 삭제', 'Click again to remove all': '한 번 더 누르면 모두 삭제',
   'Saved permanently for the team. Every authorised person sees these files; removing a file removes it for everyone.': '팀 전체에 영구 저장됩니다. 권한이 있는 모든 사람이 이 파일을 보며, 삭제하면 모두에게서 삭제됩니다.',
   'Saved in this browser on this computer. Other people and other browsers do not see them – use the page in Claude to share.': '이 컴퓨터의 이 브라우저에 저장됩니다. 다른 사람이나 다른 브라우저에서는 보이지 않습니다.',
-  'File': '파일', 'Read as': '인식 결과', 'Ship date': '출고일', 'Notes': '메모', 'Remove': '삭제', 'Confirm remove': '삭제 확인',
+  'File': '파일', 'Read as': '인식 결과', 'Read as:': '인식 결과:', '– click a file to see what is inside': '– 파일을 누르면 내용을 볼 수 있습니다', 'Ship date': '출고일', 'Notes': '메모', 'Remove': '삭제', 'Confirm remove': '삭제 확인',
   'No date in file name – check': '파일 이름에 날짜 없음 – 확인 필요', 'Files': '파일',
   // empty states
   'No files yet.': '아직 파일이 없습니다.', 'No files have been uploaded yet.': '아직 업로드된 파일이 없습니다.',
@@ -1074,6 +1106,9 @@ const KO_RE = [
   [/^Same item as (.+)$/, '같은 제품: $1'],
   [/^Assumed = (.+)$/, '같은 제품으로 가정: $1'],
   [/^July (.+)$/, '7월 $1'],
+  [/^Choose (.+) in the Month list to see this file's contents\.$/, '이 파일의 내용을 보려면 월 목록에서 $1을(를) 선택하세요.'],
+  [/^(\d+) dup$/, '중복 $1'],
+  [/^not counted$/, '집계 제외'],
   [/^Price for (.+)$/, '$1 가격'], [/^Type for (.+)$/, '$1 유형'], [/^Role for (.+)$/, '$1 역할'], [/^Ship date for (.+)$/, '$1 출고일'],
   [/^Set targets for (.+) \(₩ incl\. VAT\):$/, '$1 목표 설정 (₩, 부가세 포함):'],
   [/^(\d+)% of (.+) (on pace|behind pace)$/, (m, a, b, c) => `${b}의 ${a}% ${c === 'on pace' ? '목표 속도 유지' : '목표보다 느림'}`],
