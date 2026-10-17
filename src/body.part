@@ -76,6 +76,7 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
     <label for="month">Month <select id="month"></select></label>
     <label><input type="checkbox" id="thirdParty"> Include non-Wellwell Coupang suppliers</label>
     <span class="spacer"></span>
+    <button id="filesBtn" type="button" hidden aria-controls="filesPanel">Uploaded files <span class="pill" id="filesCount">0</span></button>
     <button id="exportBtn" class="primary" disabled title="All uploaded data for the selected month (or day) in one Excel file">Download month report</button>
   </div>
 
@@ -89,6 +90,7 @@ button.day.sel .dots i{box-shadow:0 0 0 1.5px var(--accent-ink)}
   <details class="panel" id="filesPanel" hidden>
     <summary class="section" style="cursor:pointer"><span class="bar" style="display:inline-flex"><h2 id="filesTitle">Files</h2></span></summary>
     <div class="bar" style="padding:0 16px 8px"><span class="muted small" id="filesHint"></span><span class="spacer"></span><button class="ghost" id="clearAll">Remove all files</button></div>
+    <div id="filesScope"></div>
     <div class="scroll"><table id="filesTable" style="min-width:900px"></table></div>
   </details>
   <p class="note rules">Category rules: Retail = B마트, 쿠팡, 마켓컬리 orders. 택배 = daily 발주 lines from online channels (samples, CS and staff purchases stay here, marked non-sale). 기타 = 슈퍼키친, 웰스토리, N배송 files plus any 택배 line from a B2B, 벌크 or 오프라인 customer. Free gifts (사은품) are valued at the cost of the same product.</p>
@@ -257,7 +259,7 @@ async function addFiles(list){
       const buf = await f.arrayBuffer(); const id = await sha(buf);
       const known = state.mode === 'shared' ? state.meta.has(id) : state.localFiles.some(x => x.id === id);
       if (known){ toast(f.name + ' was already uploaded – skipped'); continue; }
-      const res = Tally.parseWorkbook(XLSX, new Uint8Array(buf), f.name, today); res.id = id;
+      const res = Tally.parseWorkbook(XLSX, new Uint8Array(buf), f.name, today); res.id = id; res.addedAt = new Date().toISOString();
       if (res.settlement){ await saveSettlement(res.settlement); added++; continue; }
       if (!res.lines.length){ toast(f.name + ': ' + (res.notes[0] || 'no order lines found')); continue; }
       if (state.mode === 'local'){ state.localFiles.push(res); added++; continue; }
@@ -344,6 +346,7 @@ $('#clearAll').addEventListener('click', async () => {
   if (state.mode === 'local'){ state.localFiles = []; state.localSettlements = {}; recompute(); saveLocal(); return; }
   for (const id of [...state.meta.keys()]) await removeFile(id);
 });
+$('#filesBtn').addEventListener('click', () => { const p = $('#filesPanel'); p.open = true; p.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
 $('#thirdParty').addEventListener('change', ev => { state.thirdParty = ev.target.checked; recompute(); });
 $('#month').addEventListener('change', ev => { state.month = ev.target.value; state.day = null; ensureMonths(); recompute(); });
 
@@ -355,11 +358,19 @@ function sum(arr, f){ return arr.reduce((a,x)=>a+(f(x)||0),0); }
 function groupBy(arr, kf){ const m = new Map(); for (const x of arr){ const k = kf(x); if(!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; }
 function render(){ renderFiles(); renderMonthStrip(); renderTiles(); renderTabs(); renderView(); $('#exportBtn').disabled = !state.lines.length; }
 function fileRows(){
-  if (state.mode === 'local') return state.localFiles.map(f => ({ id: f.id, fileName: f.fileName, kinds: f.kinds, sheets: f.sheets, notes: f.notes, minor: f.minor, lines: f.lines.length, units: sum(f.lines,l=>l.qty), shipOverride: f.shipOverride, mine: true }));
-  return [...state.meta.values()].sort((a,b)=>(b.uploadedAt||'').localeCompare(a.uploadedAt||'')).map(m => ({ id: m.id, fileName: m.fileName, kinds: m.kinds, sheets: m.sheets, notes: m.notes, minor: m.minor, lines: m.lineCount, units: m.units, shipOverride: m.shipOverride, by: m.uploadedBy, byEmail: m.uploadedByEmail, at: m.uploadedAt, mine: !m.uploadedBy || m.uploadedBy === state.me }));
+  if (state.mode === 'local') return state.localFiles.map(f => ({ id: f.id, fileName: f.fileName, kinds: f.kinds, sheets: f.sheets, notes: f.notes, minor: f.minor, lines: f.lines.length, units: sum(f.lines,l=>l.qty), shipOverride: f.shipOverride, at: f.addedAt, months: [...new Set(f.lines.map(l => monthOf(f.shipOverride && l.cat==='Parcel' ? f.shipOverride : l.date)))], mine: true }));
+  return [...state.meta.values()].sort((a,b)=>(b.uploadedAt||'').localeCompare(a.uploadedAt||'')).map(m => ({ id: m.id, fileName: m.fileName, kinds: m.kinds, sheets: m.sheets, notes: m.notes, minor: m.minor, lines: m.lineCount, units: m.units, shipOverride: m.shipOverride, months: m.months || [], by: m.uploadedBy, byEmail: m.uploadedByEmail, at: m.uploadedAt, mine: !m.uploadedBy || m.uploadedBy === state.me }));
 }
 function renderFiles(){
-  const rows = fileRows(); const p = $('#filesPanel'); p.hidden = !rows.length || isViewer(); if (p.hidden) return;
+  const allRows = fileRows(); const p = $('#filesPanel'); p.hidden = !allRows.length || isViewer();
+  $('#filesBtn').hidden = p.hidden; if (p.hidden) return;
+  const m = state.month && state.month !== 'all' ? state.month : null;
+  const inMonth = m ? allRows.filter(f => (f.months || []).includes(m)) : allRows;
+  const scope = (m && state.filesScope !== 'all') ? 'month' : 'all';
+  const rows = scope === 'month' ? inMonth : allRows;
+  $('#filesCount').textContent = m ? inMonth.length : allRows.length;
+  $('#filesBtn').title = m ? `${inMonth.length} files for ${monthLabel(m)} · ${allRows.length} in total` : `${allRows.length} files in total`;
+  const scopeBar = m ? `<div class="bar" style="padding:0 16px 8px;gap:6px"><button type="button" data-scope="month" aria-pressed="${scope==='month'}" class="${scope==='month'?'primary':''}">${monthLabel(m)} (${inMonth.length})</button><button type="button" data-scope="all" aria-pressed="${scope==='all'}" class="${scope==='all'?'primary':''}">All files (${allRows.length})</button></div>` : '';
   const nw = rows.filter(f => (f.notes||[]).length || (f.kinds[0]==='Parcel' && f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride)).length;
   $('#filesTitle').innerHTML = `${state.mode==='shared'?'Team files':'Saved files'} <span class="pill">${rows.length}</span>` + (nw ? `<span class="pill warn">${nw} with notes</span>` : '') + ' <span class="muted small" style="font-weight:400">– show details</span>';
   $('#filesHint').textContent = state.mode === 'shared' ? 'Saved permanently for the team. Every authorised person sees these files; removing a file removes it for everyone.' : 'Saved in this browser on this computer. Other people and other browsers do not see them – use the page in Claude to share.';
@@ -370,11 +381,16 @@ function renderFiles(){
     const canEditRow = canAdmin() || (canWrite() && f.mine);
     const shipVal = f.shipOverride || ((f.sheets||[])[0]||{}).date || '';
     const ship = kind === 'Parcel' ? (canEditRow ? `<input type="date" value="${esc(shipVal)}" data-ship="${esc(f.id)}" aria-label="Ship date for ${esc(f.fileName)}">` : esc(shipVal)) + ((f.sheets[0] && !f.sheets[0].shipFromName && !f.shipOverride) ? '<div class="small" style="color:var(--warn)">No date in file name – check</div>' : '') : '';
-    const who = state.mode === 'shared' ? `<div class="small muted">${esc(f.byEmail || (f.by ? (state.names[f.by] || 'a team member') : ''))}${f.at ? ' · ' + esc(f.at.slice(0,16).replace('T',' ')) : ''}</div>` : '';
+    const when = f.at ? new Date(f.at).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+    const by = state.mode === 'shared' ? (f.byEmail || (f.by ? (state.names[f.by] || 'a team member') : '')) : '';
+    const who = (by || when) ? `<div class="small muted">${esc(by)}${by && when ? ' · ' : ''}${when ? 'uploaded ' + esc(when) : ''}</div>` : '';
     const rm = canEditRow ? `<button class="ghost" data-rm="${esc(f.id)}">${state.pendingRemove===f.id?'Confirm remove':'Remove'}</button>` : '';
     return `<tr><td>${esc(f.fileName)}${who}</td><td><span class="chip ${esc(kind)}">${esc(kind)}</span></td><td>${sheets || '<span class="muted">–</span>'}</td><td>${ship}</td>
       <td class="n">${n0(f.lines)}</td><td class="n">${n0(f.units)}</td><td class="small muted" style="max-width:320px">${(f.notes||[]).map(esc).join('<br>')}${f.minor?`<div>${esc(f.minor)}</div>`:''}</td><td>${rm}</td></tr>`;
   }).join('');
+  $('#filesScope').innerHTML = scopeBar;
+  $('#filesScope').querySelectorAll('[data-scope]').forEach(b => b.onclick = () => { state.filesScope = b.dataset.scope; renderFiles(); });
+  if (!rows.length){ $('#filesTable').innerHTML = `<tbody><tr><td class="empty">No files uploaded for ${esc(monthLabel(m))} yet.</td></tr></tbody>`; return; }
   $('#filesTable').innerHTML = `<thead><tr><th>File</th><th>Type</th><th>Read as</th><th>Ship date</th><th class="n">Lines</th><th class="n">Units</th><th>Notes</th><th></th></tr></thead><tbody>${body}</tbody>`;
   $('#filesTable').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
     const id = b.dataset.rm;
